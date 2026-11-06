@@ -16,3 +16,17 @@
 Откройте `https://ВАШ-WORKER.workers.dev/health`. Поле `geminiConfigured` должно быть true после добавления ключа.
 
 Секрет Gemini нельзя добавлять в GitHub или клиентский JavaScript.
+
+
+## Защита API через Cloudflare Access
+
+Worker умеет проверять JWT Cloudflare Access (RS256, подпись по JWKS, issuer, audience, exp/nbf). Чтобы включить обязательную защиту:
+
+1. В Cloudflare Zero Trust создайте Access application типа Self-hosted для домена Worker (например, `slav-ai-cloud.slafka1996.workers.dev`) и задайте политику Allow только для своих email.
+2. В Worker → Settings → Variables and Secrets добавьте:
+   - `AUTH_REQUIRED` = `true` (обычная переменная).
+   - `CF_ACCESS_TEAM_DOMAIN` = домен команды вида `https://<team>.cloudflareaccess.com`.
+   - `CF_ACCESS_AUD` = Audience (AUD) Tag созданного Access-приложения.
+3. Проверьте вход через браузер и запросы API. Без валидного Access JWT API вернёт 401; если обязательная защита включена, но параметры отсутствуют — 503.
+
+Важно: до включения `AUTH_REQUIRED=true` API остаётся доступным без входа. Cloudflare Access ограничивает доступ к приложению, но само по себе ещё не реализует многопользовательское разделение данных в D1. Не открывайте приложение широкой аудитории и не храните в нём чужие секреты, пока не добавлена изоляция данных по пользователям. `/health` оставлен публичным и не выдаёт секреты.
