@@ -131,10 +131,12 @@ $("#devCommit").addEventListener("click",async()=>{
 $("#agentRun").addEventListener("click",async()=>{
   const task=$("#agentTask").value.trim();
   if(!task){$("#agentResult").textContent="Опиши задачу для агента.";return;}
-  const btn=$("#agentRun");btn.disabled=true;$("#agentResult").textContent="Агент изучает проект, читает файлы и готовит решение…";
+  const btn=$("#agentRun"),floor=document.querySelector(".office-floor");btn.disabled=true;floor.classList.add("busy");
+  $("#devAgentState").textContent="Получает задачу…";$("#designAgentState").textContent="Ожидает распределения";$("#testAgentState").textContent="Ожидает код";
+  $("#agentResult").textContent="Диспетчер принимает задачу и направляет её разработчику…";
   try{
     const data=await devRequest("/api/agent",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({task})});
     $("#agentResult").textContent=(data.answer||"Готово.")+"\n\nПодготовленные файлы:\n"+((data.staged||[]).map(x=>x.path+" ("+x.characters+" символов)").join("\n")||"Нет");
   }catch(e){$("#agentResult").textContent="Ошибка агента: "+e.message;}
-  finally{btn.disabled=false;}
+  finally{btn.disabled=false;floor.classList.remove("busy");}
 });
