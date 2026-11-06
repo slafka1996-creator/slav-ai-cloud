@@ -99,3 +99,11 @@ test("chat streams incremental assistant text from the server", async ({ page })
   await page.locator("#sendBtn").click();
   await expect(page.locator("#messages .message.assistant .content")).toContainText("Первая часть и вторая часть.");
 });
+
+
+test("stop generation control is available and hidden before sending", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#stopBtn")).toBeAttached();
+  await expect(page.locator("#stopBtn")).toBeHidden();
+  await expect(page.locator("#stopBtn")).toHaveAttribute("aria-label", "Остановить генерацию");
+});
