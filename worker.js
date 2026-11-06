@@ -449,7 +449,9 @@ export default {
       try { body = await request.json(); }
       catch { return json({ error: "Некорректный JSON-запрос." }, 400); }
 
-      const message = String(body.message || "").trim().slice(0, 12000);
+      const userText = String(body.message || "").trim().slice(0, 30000);
+      const attachmentContext = String(body.attachmentContext || "").slice(0, 100000);
+      const message = (userText + (attachmentContext ? "\n\n[Содержимое прикреплённых файлов]\n" + attachmentContext : "")).trim().slice(0, 130000);
       if (!message) return json({ error: "Напиши сообщение." }, 400);
 
       const conversationId = String(body.conversationId || id());
@@ -468,7 +470,7 @@ export default {
       if (env.DB) {
         try {
           const rows = await env.DB.prepare(
-            "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 12"
+            "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 30"
           ).bind(conversationId).all();
           history = (rows.results || []).reverse().map(row => ({
             role: row.role,
@@ -484,7 +486,7 @@ export default {
 
       // Основная модель — бесплатная NVIDIA Nemotron через OpenRouter.
       if (env.OPENROUTER_API_KEY) {
-        const model = env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free";
+        const model = env.SLAV_CHAT_MODEL || env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free";
         try {
           const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
@@ -501,7 +503,7 @@ export default {
                 ...history,
                 { role: "user", content: message }
               ],
-              max_tokens: 4096
+              max_tokens: 8192
             })
           });
           const result = await upstream.json().catch(() => ({}));
@@ -517,7 +519,7 @@ export default {
 
       // Резервный маршрут Gemini, если он настроен и бесплатный маршрут временно недоступен.
       if (!answer && env.GEMINI_API_KEY) {
-        const model = "gemini-3.8-flash";
+        const model = env.GEMINI_CHAT_MODEL || "gemini-3.8-flash";
         const geminiHistory = history.map(row => ({
           role: row.role === "assistant" ? "model" : "user",
           parts: [{ text: row.content }]
@@ -533,7 +535,7 @@ export default {
               body: JSON.stringify({
                 systemInstruction: { parts: [{ text: system }] },
                 contents: [...geminiHistory, { role: "user", parts: [{ text: message }] }],
-                generationConfig: { maxOutputTokens: 4096 }
+                generationConfig: { maxOutputTokens: 8192 }
               })
             }
           );
@@ -575,7 +577,7 @@ export default {
         }
       }
 
-      return json({ answer, conversationId });
+      return json({ answer, conversationId, model: env.SLAV_CHAT_MODEL || env.OPENROUTER_MODEL || (env.GEMINI_CHAT_MODEL || "gemini-3.8-flash") });
     }
 
     if (url.pathname === "/api/conversations" && request.method === "GET") {
