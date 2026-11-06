@@ -93,9 +93,120 @@ async function ensureDatabase(env) {
   `).run();
 }
 
+
+async function telegramApi(env, method, payload) {
+  const response = await fetch("https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/" + method, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.description || ("Telegram API HTTP " + response.status));
+  return data.result;
+}
+
+async function handleTelegramWebhook(request, env) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET) return json({ error: "Telegram bot is not configured." }, 503);
+  if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TELEGRAM_WEBHOOK_SECRET) return json({ error: "Forbidden" }, 403);
+  const update = await request.json().catch(() => null);
+  if (!update) return json({ error: "Invalid update" }, 400);
+  const message = update.message;
+  if (!message?.from || !message?.chat || message.chat.type !== "private" || typeof message.text !== "string") return json({ ok: true });
+  const chatId = String(message.chat.id), userId = String(message.from.id);
+  const text = message.text.trim().slice(0, 12000);
+  if (!text) return json({ ok: true });
+  const send = async value => {
+    const chunks = String(value || "").match(/[\\s\\S]{1,3900}/g) || ["Пустой ответ."];
+    for (const chunk of chunks) await telegramApi(env, "sendMessage", { chat_id: chatId, text: chunk, disable_web_page_preview: true });
+  };
+  try {
+    if (text === "/start" || text.startsWith("/start ")) {
+      await send("Привет! Я SLAV AI — твой ИИ-помощник.\\n\\nМогу помогать с программированием, анализом, текстами, идеями и документами. Просто напиши сообщение.\\n\\nКоманды:\\n/new — новый диалог\\n/mode — выбрать режим\\n/help — помощь\\n\\nИстория диалогов хранится отдельно для твоего Telegram-аккаунта.");
+      return json({ ok: true });
+    }
+    if (text === "/help") {
+      await send("Напиши вопрос обычным сообщением. Для нового диалога используй /new. Режимы: /mode chat, /mode think, /mode code, /mode research. Пока бот принимает текстовые сообщения; загрузку документов и изображений добавим следующим этапом.");
+      return json({ ok: true });
+    }
+    if (!env.DB) { await send("База данных пока не подключена. Добавь D1 binding DB, чтобы бот мог хранить отдельную историю каждого пользователя."); return json({ ok: true }); }
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS telegram_sessions (chat_id TEXT NOT NULL, user_id TEXT NOT NULL, conversation_id TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'chat', updated_at TEXT NOT NULL, PRIMARY KEY(chat_id,user_id))`).run();
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS telegram_messages (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL)`).run();
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_telegram_history ON telegram_messages(chat_id,user_id,created_at)").run();
+    let session = await env.DB.prepare("SELECT conversation_id,mode FROM telegram_sessions WHERE chat_id=? AND user_id=?").bind(chatId,userId).first();
+    if (text === "/new") {
+      const next = id(), now = new Date().toISOString();
+      await env.DB.prepare("INSERT INTO telegram_sessions (chat_id,user_id,conversation_id,mode,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET conversation_id=excluded.conversation_id,updated_at=excluded.updated_at").bind(chatId,userId,next,session?.mode||"chat",now).run();
+      await send("Начали новый диалог. Контекст предыдущего диалога сохранён отдельно.");
+      return json({ ok: true });
+    }
+    if (text === "/mode" || text.startsWith("/mode ")) {
+      const modes = { chat: "Обычный чат", think: "Глубокий анализ", code: "Программирование", research: "Исследование" };
+      const requested = text.split(/\\s+/)[1];
+      if (!requested) { await send("Выбери режим командой:\\n/mode chat\\n/mode think\\n/mode code\\n/mode research"); return json({ ok: true }); }
+      if (!modes[requested]) { await send("Неизвестный режим. Доступно: chat, think, code, research."); return json({ ok: true }); }
+      const now = new Date().toISOString(), conv = session?.conversation_id || id();
+      await env.DB.prepare("INSERT INTO telegram_sessions (chat_id,user_id,conversation_id,mode,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET mode=excluded.mode,updated_at=excluded.updated_at").bind(chatId,userId,conv,requested,now).run();
+      await send("Режим изменён: " + modes[requested]);
+      return json({ ok: true });
+    }
+    if (text.startsWith("/")) { await send("Неизвестная команда. Напиши /help."); return json({ ok: true }); }
+    const now = new Date().toISOString(), conversationId = session?.conversation_id || id(), mode = session?.mode || "chat";
+    const recent = await env.DB.prepare("SELECT COUNT(*) AS n FROM telegram_messages WHERE chat_id=? AND user_id=? AND created_at>=?").bind(chatId,userId,new Date(Date.now()-60000).toISOString()).first();
+    if ((recent?.n || 0) >= 12) { await send("Слишком много запросов подряд. Подожди минуту и попробуй снова."); return json({ ok: true }); }
+    await env.DB.prepare("INSERT INTO telegram_sessions (chat_id,user_id,conversation_id,mode,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET updated_at=excluded.updated_at").bind(chatId,userId,conversationId,mode,now).run();
+    const rows = await env.DB.prepare("SELECT role,content FROM telegram_messages WHERE chat_id=? AND user_id=? ORDER BY created_at DESC LIMIT 20").bind(chatId,userId).all();
+    const history = (rows.results || []).reverse().map(row => ({ role: row.role, content: row.content }));
+    const modePrompt = {
+      chat: "Отвечай естественно, понятно и по делу.",
+      think: "Внимательно анализируй задачу, проверяй предположения, объясняй выводы и неопределённость.",
+      code: "Ты опытный программист. Предлагай рабочие решения и полный код, объясняй запуск и проверку. Не утверждай, что запускал код, если этого не делал.",
+      research: "Проводя исследование, отделяй проверенные факты от предположений. Не выдумывай источники и ссылки."
+    };
+    const system = "Ты SLAV AI — сильный русскоязычный универсальный ИИ-помощник. " + modePrompt[mode] + " Отвечай на русском, если не попросили другой язык. Будь точным, полезным и подробным настолько, насколько требует задача. Не выдумывай доступ к инструментам. Форматируй ответ простым Markdown.";
+    await telegramApi(env,"sendChatAction",{chat_id:chatId,action:"typing"});
+    let answer = "", providerError = "";
+    const model = env.TELEGRAM_MODEL || env.SLAV_CHAT_MODEL || env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free";
+    if (env.OPENROUTER_API_KEY) {
+      const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions",{
+        method:"POST",headers:{"authorization":"Bearer "+env.OPENROUTER_API_KEY,"content-type":"application/json","HTTP-Referer":"https://slav-ai-cloud.slafka1996.workers.dev","X-Title":"SLAV AI Telegram"},
+        body:JSON.stringify({model,messages:[{role:"system",content:system},...history,{role:"user",content:text}],max_tokens:8192})
+      });
+      const data = await upstream.json().catch(()=>({}));
+      if (upstream.ok) answer = String(data.choices?.[0]?.message?.content || "").trim();
+      else providerError = data.error?.message || ("OpenRouter HTTP "+upstream.status);
+    }
+    if (!answer && env.GEMINI_API_KEY) {
+      const geminiModel = env.GEMINI_CHAT_MODEL || "gemini-3.8-flash";
+      const geminiHistory = history.map(row=>({role:row.role==="assistant"?"model":"user",parts:[{text:row.content}]}));
+      const fallback = await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(geminiModel)+":generateContent?key="+encodeURIComponent(env.GEMINI_API_KEY),{
+        method:"POST",headers:{"content-type":"application/json"},
+        body:JSON.stringify({systemInstruction:{parts:[{text:system}]},contents:[...geminiHistory,{role:"user",parts:[{text}]}],generationConfig:{maxOutputTokens:8192}})
+      });
+      const data = await fallback.json().catch(()=>({}));
+      if (fallback.ok) answer = (data.candidates?.[0]?.content?.parts||[]).map(part=>part.text||"").join("").trim();
+      else providerError = data.error?.message || ("Gemini HTTP "+fallback.status);
+    }
+    if (!answer) throw new Error(providerError || "Модель не вернула ответ.");
+    const savedAt = new Date().toISOString();
+    await env.DB.prepare("INSERT INTO telegram_messages (id,chat_id,user_id,role,content,created_at) VALUES (?,?,?,?,?,?)").bind(id(),chatId,userId,"user",text,savedAt).run();
+    await env.DB.prepare("INSERT INTO telegram_messages (id,chat_id,user_id,role,content,created_at) VALUES (?,?,?,?,?,?)").bind(id(),chatId,userId,"assistant",answer,savedAt).run();
+    await env.DB.prepare("DELETE FROM telegram_messages WHERE chat_id=? AND user_id=? AND id NOT IN (SELECT id FROM telegram_messages WHERE chat_id=? AND user_id=? ORDER BY created_at DESC LIMIT 40)").bind(chatId,userId,chatId,userId).run();
+    await send(answer);
+  } catch (error) {
+    try { await send("Не удалось обработать запрос: " + (error.message || "ошибка сервера")); } catch {}
+  }
+  return json({ ok: true });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/telegram/webhook" && request.method === "POST") {
+      return handleTelegramWebhook(request, env);
+    }
+    if (url.pathname === "/telegram/status" && request.method === "GET") {
+      return json({ configured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_WEBHOOK_SECRET), webhookPath: "/telegram/webhook", databaseRequired: true });
+    }
+
 
     if (url.pathname.startsWith("/api/")) {
       const access = await verifyCloudflareAccess(request, env);
@@ -114,6 +225,7 @@ export default {
       return json({
         ok: true,
         app: "SLAV AI",
+        telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_WEBHOOK_SECRET),
         model: env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free",
         provider: env.OPENROUTER_API_KEY ? "OpenRouter" : "Gemini",
         openrouterConfigured: Boolean(env.OPENROUTER_API_KEY),
