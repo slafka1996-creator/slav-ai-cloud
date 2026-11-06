@@ -5,6 +5,8 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 
 const id = () => crypto.randomUUID();
 
+let ciStatusCache = { value: null, expiresAt: 0 };
+
 async function verifyCloudflareAccess(request, env) {
   const required = env.AUTH_REQUIRED === "true";
   const team = String(env.CF_ACCESS_TEAM_DOMAIN || "").replace(/\/$/, "");
@@ -130,11 +132,26 @@ export default {
 
     if (url.pathname === "/api/ci/status" && request.method === "GET") {
       try {
-        const headers = { accept: "application/vnd.github+json", "user-agent": "SLAV-AI-Cloud/1.0" };
+        // Use the server-side GitHub token so every visitor does not consume the shared unauthenticated IP quota.
+        // Cache successful results briefly to reduce Actions API calls from frequent page refreshes.
+        if (ciStatusCache.value && ciStatusCache.expiresAt > Date.now()) {
+          return json({ ...ciStatusCache.value, cached: true });
+        }
+        const headers = {
+          accept: "application/vnd.github+json",
+          "user-agent": "SLAV-AI-Cloud/1.0",
+          ...(env.GITHUB_TOKEN ? { authorization: "Bearer " + env.GITHUB_TOKEN } : {})
+        };
         const base = "https://api.github.com/repos/slafka1996-creator/slav-ai-cloud/actions";
         const rr = await fetch(base + "/runs?per_page=5", { headers });
         const rd = await rr.json().catch(() => ({}));
-        if (!rr.ok) return json({ error: rd.message || "Не удалось получить CI." }, 502);
+        if (!rr.ok) {
+          if (ciStatusCache.value) return json({ ...ciStatusCache.value, cached: true, stale: true });
+          const message = rr.status === 403 && /resource not accessible|permissions/i.test(rd.message || "")
+            ? "GitHub-токену SLAV AI требуется разрешение Actions: Read."
+            : rd.message || "Не удалось получить CI.";
+          return json({ error: message }, rr.status === 403 ? 503 : 502);
+        }
         const run = (rd.workflow_runs || []).find(x => x.name === "Browser smoke tests");
         if (!run) return json({ configured: true, found: false, message: "Запуски тестов не найдены." });
         const jr = await fetch(base + "/runs/" + run.id + "/jobs", { headers });
@@ -143,10 +160,12 @@ export default {
           name: x.name, status: x.status, conclusion: x.conclusion,
           failedSteps: (x.steps || []).filter(s => s.conclusion === "failure").map(s => s.name)
         }));
-        return json({ configured: true, found: true, run: {
+        const payload = { configured: true, found: true, run: {
           id: run.id, number: run.run_number, status: run.status, conclusion: run.conclusion,
           sha: run.head_sha, title: run.display_title, url: run.html_url, updatedAt: run.updated_at
-        }, jobs });
+        }, jobs };
+        ciStatusCache = { value: payload, expiresAt: Date.now() + 60000 };
+        return json(payload);
       } catch (e) { return json({ error: "CI status error: " + e.message }, 502); }
     }
 
@@ -260,7 +279,10 @@ export default {
           if(archiveSize>32*1024*1024) throw new Error("Архив репозитория превышает лимит Sandbox 32 МБ.");
           const archive=await archiveResponse.arrayBuffer();
           if(archive.byteLength>32*1024*1024) throw new Error("Архив репозитория превышает лимит Sandbox 32 МБ.");
-          await sandboxCall("/v1/sandbox/"+encodeURIComponent(sandboxId)+"/hydrate",{method:"POST",headers:{"content-type":"application/gzip"},body:archive});
+          // GitHub tarball API returns gzip-compressed tar; Sandbox hydrate expects an uncompressed tar stream.
+          const tar=await new Response(new Blob([archive]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+          if(tar.byteLength>32*1024*1024) throw new Error("Распакованный архив превышает лимит Sandbox 32 МБ.");
+          await sandboxCall("/v1/sandbox/"+encodeURIComponent(sandboxId)+"/hydrate",{method:"POST",headers:{"content-type":"application/x-tar"},body:tar});
           const seed=await runSandbox("set -e; root=$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -n 1); test -n \\"$root\\"; mkdir -p /workspace/repo; cp -a \\"$root\\"/. /workspace/repo/; cd /workspace/repo; git init -q; git add -A; git -c user.name='SLAV AI Sandbox' -c user.email='sandbox@slav-ai.invalid' commit -qm 'Sandbox baseline'; printf 'Sandbox workspace ready: '; pwd; git rev-parse --short HEAD",90000,"/workspace");
           if(seed.exitCode!==0) throw new Error(seed.stderr||seed.error||"Не удалось подготовить файлы репозитория в Sandbox.");
         }catch(e){if(sandboxId) await fetch(sandboxBase+"/v1/sandbox/"+encodeURIComponent(sandboxId),{method:"DELETE",headers:sandboxHeaders}).catch(()=>{});return json({error:"Не удалось подготовить Sandbox: "+e.message},503);}
