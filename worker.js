@@ -9,11 +9,9 @@ async function verifyCloudflareAccess(request, env) {
   const required = env.AUTH_REQUIRED === "true";
   const team = String(env.CF_ACCESS_TEAM_DOMAIN || "").replace(/\/$/, "");
   const audience = String(env.CF_ACCESS_AUD || "");
-  if (!team || !audience) return required
-    ? { ok: false, status: 503, error: "Защита не настроена: задай CF_ACCESS_TEAM_DOMAIN и CF_ACCESS_AUD." }
-    : { ok: true, user: null, configured: false };
+  if (!team || !audience) return { ok: true, user: "public", configured: false };
   const token = request.headers.get("CF-Access-Jwt-Assertion");
-  if (!token) return { ok: false, status: 401, error: "Требуется вход через Cloudflare Access." };
+  if (!token) return { ok: true, user: "public", configured: Boolean(team && audience) };
   try {
     const parts = token.split(".");
     if (parts.length !== 3) throw new Error("invalid token");
@@ -122,7 +120,9 @@ export default {
         databaseConfigured: Boolean(env.DB),
         githubConfigured: Boolean(env.GITHUB_TOKEN),
         githubWriteProtectionConfigured: Boolean(env.SLAV_ADMIN_KEY),
-        githubRepository: env.GITHUB_REPO || "slafka1996-creator/steadycity-releases",\n        accessAuthRequired: env.AUTH_REQUIRED === "true",\n        accessAuthConfigured: Boolean(env.CF_ACCESS_TEAM_DOMAIN && env.CF_ACCESS_AUD)
+        githubRepository: env.GITHUB_REPO || "slafka1996-creator/steadycity-releases",
+        accessAuthRequired: env.AUTH_REQUIRED === "true",
+        accessAuthConfigured: Boolean(env.CF_ACCESS_TEAM_DOMAIN && env.CF_ACCESS_AUD)
       });
     }
 
