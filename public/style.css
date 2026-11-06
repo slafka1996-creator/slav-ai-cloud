@@ -11,3 +11,29 @@
 @keyframes dispatchWalk{0%,100%{transform:translate(0,0)}25%{transform:translate(20px,-8px)}50%{transform:translate(45px,4px)}75%{transform:translate(18px,10px)}}
 .office-flow{display:flex;align-items:center;justify-content:center;gap:9px;flex-wrap:wrap;color:#aebbd0;font-size:10px;padding:12px 0}.office-flow b{color:#8b7cff}.office-task-label{display:block;color:#b6c3d6;font-size:11px;margin:4px 0}
 @media(max-width:520px){.office-floor{grid-template-columns:85px 1fr;padding:8px;min-height:220px;gap:7px}.office-team{gap:5px}.desk{min-height:108px;padding:8px 3px}.desk b{font-size:9px}.desk small{font-size:8px}.person{transform:scale(.85)}.office-dispatcher{padding:5px}}
+
+:root{color-scheme:dark;--bg:#0b0b0c;--panel:#171514;--panel2:#24201c;--line:#49301f;--text:#fff5eb;--muted:#b8a89b;--accent:#ff861f}
+body{background:#0b0b0c;color:#fff4e9}
+.sidebar{background:#11100f;border-color:#352318}
+.logo,.welcome-logo{background:linear-gradient(135deg,#ff9a32,#d94d08)}
+.mode.active,.mode:hover{background:#382316;color:#fff}.new-chat{background:#211913;border-color:#51331d}
+.main header{border-color:#382619;background:#100f0e}.export{border-color:#65401f;color:#f2c39a}
+.composer{background:#171412;border-color:#75431e;box-shadow:0 10px 35px #0008}
+.composer button,.dev-commit{background:linear-gradient(135deg,#ff9b32,#e45b0b);color:#1b1008}
+.message.user .avatar{background:#a94d16}.avatar{background:#382619}
+.suggestions button{background:#191512;border-color:#54351e;color:#f3d5bc}
+.office-main{padding:14px 18px 0;flex:0 0 auto}
+.office{background:#17120e;border:1px solid #74421e;border-radius:16px;padding:13px;margin:0 auto;max-width:1080px;box-shadow:0 12px 38px #0007}
+.office-top b{color:#ffb16b}
+.office-floor{min-height:190px;background-color:#20170f;background-image:linear-gradient(#ff9b3210 1px,transparent 1px),linear-gradient(90deg,#ff9b3210 1px,transparent 1px);background-size:22px 22px;border:1px solid #503019}
+.office-dispatcher{background:#2b1b10;border-color:#a75b20}.office-dispatcher strong{color:#ffd2a5}
+.desk{background:#2a2018;border-color:#68401f;box-shadow:inset 0 -5px #17100b}.desk-screen{background:#130f0b;border-color:#a85b20;color:#ff9a32}
+.dispatcher{background:#e87518}.dev-person{background:#bd6426}.design-person{background:#c18a42}.test-person{background:#a65a2b}
+.office-flow{color:#d6b79d}.office-flow b{color:#ff922e}.office-task-label{color:#ffd1a6}
+.office textarea#agentTask{display:block;width:100%;margin-top:7px;background:#100e0c;border:1px solid #70421f;border-radius:10px;color:#fff2e6;padding:11px;font:inherit;resize:vertical}
+.office .dev-commit{margin-top:9px;border:0;font-weight:700}.office .dev-list{max-height:140px;color:#f0c9a7}
+.office-floor.busy .desk{border-color:#ff922e;box-shadow:0 0 18px #ff861f33,inset 0 -5px #17100b}
+.dev-panel{background:#050403ed}.dev-card{background:#17120e;border-color:#74421e}
+.dev-card input,.dev-card textarea{background:#100e0c;border-color:#68421f;color:#fff4e9}
+.dev-actions button{background:#2a1c12;border-color:#70421f;color:#ffe0c3}
+@media(max-width:700px){.office-main{padding:9px 8px 0}.office{padding:9px;border-radius:12px}.office-floor{min-height:170px}.office-top b{font-size:10px}.main header{gap:7px}.main header small{font-size:10px}.export{font-size:11px;padding:7px 8px}}
