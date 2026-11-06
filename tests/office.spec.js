@@ -62,3 +62,19 @@ test("chat supports attaching text and source files", async ({ page }) => {
   await expect(page.locator("#fileInput")).toHaveAttribute("multiple", "");
   await expect(page.locator("#attachmentList")).toBeAttached();
 });
+
+
+test("assistant messages render Markdown and copyable fenced code safely", async ({ page }) => {
+  await page.route("**/api/chat", async route => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({answer:"## Готово\n\n**Важное** описание.\n\n```js\nconst answer = 42;\n```",conversationId:"test-chat"})
+  }));
+  await page.goto("/");
+  await page.locator("#prompt").fill("Покажи пример");
+  await page.locator("#sendBtn").click();
+  await expect(page.locator("#messages h2")).toHaveText("Готово");
+  await expect(page.locator("#messages strong")).toHaveText("Важное");
+  await expect(page.locator("#messages .code-block code")).toContainText("const answer = 42;");
+  await expect(page.locator("#messages .copy-code")).toBeVisible();
+});
