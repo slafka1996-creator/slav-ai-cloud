@@ -22,7 +22,24 @@
       <div class="side-bottom"><span id="statusDot"></span><span id="statusText">Проверка подключения…</span></div>
     </aside>
     <main class="main">
-      <header><button id="menuBtn" class="menu-btn">☰</button><div><b id="modeTitle">Обычный чат</b><small>SLAV AI · Cloud</small></div><button id="devBtn" class="export" type="button" onclick="document.getElementById('devPanel').hidden=false">Developer</button><button id="exportBtn" class="export">Экспорт</button></header>
+      <section class="office-main">      <section class="office">
+        <div class="office-top"><div><span class="live-dot"></span><b>SLAV AI · ОФИС РАЗРАБОТКИ</b><small>Центр управления задачами</small></div><span class="office-live">ONLINE</span></div>
+        <div class="office-floor">
+          <div class="office-dispatcher"><div class="person dispatcher"><i></i><b>SLAV</b></div><strong>Диспетчер</strong><small>Раздаёт задачи команде</small><span class="walk-path"></span></div>
+          <div class="office-team">
+            <div class="desk"><div class="person dev-person"><i></i></div><b>Developer</b><small id="devAgentState">Ожидает задачу</small><span class="desk-screen">⌘</span></div>
+            <div class="desk"><div class="person design-person"><i></i></div><b>UI Designer</b><small id="designAgentState">Ожидает задачу</small><span class="desk-screen">◧</span></div>
+            <div class="desk"><div class="person test-person"><i></i></div><b>Browser Tester</b><small id="testAgentState">Ожидает задачу</small><span class="desk-screen">✓</span></div>
+          </div>
+        </div>
+        <div class="office-flow"><span>1 · Диспетчер</span><b>→</b><span>2 · Специалисты</span><b>→</b><span>3 · Проверка</span></div>
+        <label class="office-task-label">Новое задание для офиса</label>
+        <textarea id="agentTask" rows="3" placeholder="Опиши задачу обычными словами. Диспетчер распределит работу…"></textarea>
+        <button id="agentRun" class="dev-commit" type="button">Передать задачу команде</button>
+        <div id="agentResult" class="dev-list"></div>
+      </section>
+</section>
+      <header><button id="menuBtn" class="menu-btn">☰</button><div><b id="modeTitle">Офис SLAV AI</b><small>Команда автономной разработки · Cloud</small></div><button id="devBtn" class="export" type="button" onclick="document.getElementById('devPanel').hidden=false">Файлы проекта</button><button id="exportBtn" class="export">Экспорт</button></header>
       <section id="messages" class="messages">
         <div class="welcome" id="welcome">
           <div class="welcome-logo">S</div>
@@ -47,22 +64,6 @@
   <section id="devPanel" class="dev-panel" hidden>
     <div class="dev-card">
       <div class="dev-head"><div><b>SLAV AI · Командный офис</b><small>Диспетчер и команда AI-специалистов</small></div><button id="devClose" class="export">Закрыть</button></div>
-      <section class="office">
-        <div class="office-top"><div><span class="live-dot"></span><b>SLAV AI · ОФИС РАЗРАБОТКИ</b><small>Центр управления задачами</small></div><span class="office-live">ONLINE</span></div>
-        <div class="office-floor">
-          <div class="office-dispatcher"><div class="person dispatcher"><i></i><b>SLAV</b></div><strong>Диспетчер</strong><small>Раздаёт задачи команде</small><span class="walk-path"></span></div>
-          <div class="office-team">
-            <div class="desk"><div class="person dev-person"><i></i></div><b>Developer</b><small id="devAgentState">Ожидает задачу</small><span class="desk-screen">⌘</span></div>
-            <div class="desk"><div class="person design-person"><i></i></div><b>UI Designer</b><small id="designAgentState">Ожидает задачу</small><span class="desk-screen">◧</span></div>
-            <div class="desk"><div class="person test-person"><i></i></div><b>Browser Tester</b><small id="testAgentState">Ожидает задачу</small><span class="desk-screen">✓</span></div>
-          </div>
-        </div>
-        <div class="office-flow"><span>1 · Диспетчер</span><b>→</b><span>2 · Специалисты</span><b>→</b><span>3 · Проверка</span></div>
-        <label class="office-task-label">Новое задание для офиса</label>
-        <textarea id="agentTask" rows="3" placeholder="Опиши задачу обычными словами. Диспетчер распределит работу…"></textarea>
-        <button id="agentRun" class="dev-commit" type="button">Передать задачу команде</button>
-        <div id="agentResult" class="dev-list"></div>
-      </section>
       <div class="dev-actions"><button id="repoRefresh">Файлы репозитория</button><button id="stagedRefresh">Подготовленные изменения</button></div>
       <div id="repoTree" class="dev-list"></div>
       <label>Путь к файлу <input id="devPath" placeholder="gorodok/путь/к/файлу"></label>
