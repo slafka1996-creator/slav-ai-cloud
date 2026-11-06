@@ -120,3 +120,62 @@ $("#agentRun").addEventListener("click",async()=>{
   }catch(e){$("#agentResult").textContent="Ошибка агента: "+e.message;}
   finally{btn.disabled=false;floor.classList.remove("busy");}
 });
+
+
+// Workspace navigation, durable projects and interactive HTML artifacts.
+let activeView = "chat";
+let editingProjectId = null;
+function showView(view) {
+  activeView = view;
+  document.querySelectorAll(".workspace-tab").forEach(b=>b.classList.toggle("active",b.dataset.view===view));
+  $("#projectsView").hidden = view !== "projects";
+  $("#artifactsView").hidden = view !== "artifacts";
+  $("#messages").hidden = view !== "chat";
+  $(".composer-wrap").hidden = view !== "chat";
+  $(".office-main").hidden = view !== "chat";
+  $("#modeTitle").textContent = view==="projects" ? "Проекты" : view==="artifacts" ? "Artifacts" : "Офис SLAV AI";
+  if(view==="projects") loadProjects();
+}
+document.querySelectorAll(".workspace-tab").forEach(b=>b.addEventListener("click",()=>showView(b.dataset.view)));
+async function loadProjects(){
+  const list=$("#projectList");
+  list.innerHTML='<div class="empty-state">Загружаю проекты…</div>';
+  try{
+    const data=await devRequest("/api/projects");
+    if(!data.projects?.length){list.innerHTML='<div class="empty-state">Пока нет проектов. Создай первый — его инструкции будут храниться отдельно.</div>';return;}
+    list.replaceChildren();
+    data.projects.forEach(p=>{
+      const card=document.createElement("article");card.className="project-card";
+      const h=document.createElement("h3");h.textContent=p.name;
+      const d=document.createElement("p");d.textContent=p.description||"Без описания";
+      const meta=document.createElement("small");meta.textContent="Обновлён: "+new Date(p.updated_at).toLocaleString("ru-RU");
+      const actions=document.createElement("div");actions.className="project-actions";
+      const open=document.createElement("button");open.className="primary-action";open.textContent="Открыть в чате";open.onclick=()=>{conversationId=null;transcript=[];messages.innerHTML="";showView("chat");promptBox.value="Работаем над проектом «"+p.name+"». Описание: "+p.description+". Инструкции проекта: "+p.instructions+". Учитывай этот контекст во всех ответах.";send();};
+      const edit=document.createElement("button");edit.className="secondary-action";edit.textContent="Изменить";edit.onclick=()=>editProject(p);
+      const del=document.createElement("button");del.className="secondary-action danger";del.textContent="Удалить";del.onclick=async()=>{if(!confirm("Удалить проект «"+p.name+"»?"))return;await devRequest("/api/projects/"+encodeURIComponent(p.id),{method:"DELETE"});loadProjects();};
+      actions.append(open,edit,del);card.append(h,d,meta,actions);list.append(card);
+    });
+  }catch(e){list.textContent="Не удалось загрузить проекты: "+e.message;}
+}
+function editProject(p=null){
+  editingProjectId=p?.id||null;$("#projectEditor").hidden=false;$("#projectEditorTitle").textContent=p?"Настройки проекта":"Новый проект";
+  $("#projectName").value=p?.name||"";$("#projectDescription").value=p?.description||"";$("#projectInstructions").value=p?.instructions||"";$("#projectFeedback").textContent="";
+  $("#projectName").focus();
+}
+$("#createProject").addEventListener("click",()=>editProject());
+$("#cancelProject").addEventListener("click",()=>$("#projectEditor").hidden=true);
+$("#saveProject").addEventListener("click",async()=>{
+  const payload={name:$("#projectName").value.trim(),description:$("#projectDescription").value,instructions:$("#projectInstructions").value};
+  if(!payload.name){$("#projectFeedback").textContent="Введи название проекта.";return;}
+  const btn=$("#saveProject");btn.disabled=true;
+  try{await devRequest(editingProjectId?"/api/projects/"+encodeURIComponent(editingProjectId):"/api/projects",{method:editingProjectId?"PUT":"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});$("#projectEditor").hidden=true;await loadProjects();}
+  catch(e){$("#projectFeedback").textContent="Ошибка: "+e.message;}finally{btn.disabled=false;}
+});
+let currentArtifact="";
+$("#generateArtifact").addEventListener("click",async()=>{
+  const prompt=$("#artifactPrompt").value.trim();if(!prompt){$("#artifactStatus").textContent="Опиши, что нужно создать.";return;}
+  const btn=$("#generateArtifact");btn.disabled=true;$("#artifactStatus").textContent="AI создаёт приложение…";
+  try{const data=await devRequest("/api/artifact",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({prompt})});currentArtifact=data.html;$("#artifactPreview").srcdoc=currentArtifact;$("#artifactTitle").textContent="Готовый артефакт";$("#downloadArtifact").disabled=false;$("#artifactStatus").textContent="Создано. Предпросмотр изолирован в sandbox.";}
+  catch(e){$("#artifactStatus").textContent="Не удалось создать: "+e.message;}finally{btn.disabled=false;}
+});
+$("#downloadArtifact").addEventListener("click",()=>{if(!currentArtifact)return;const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([currentArtifact],{type:"text/html"}));a.download="slav-ai-artifact.html";a.click();URL.revokeObjectURL(a.href);});
