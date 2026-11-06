@@ -119,6 +119,7 @@ export default {
         geminiFallbackModel: "gemini-3.8-flash",
         databaseConfigured: Boolean(env.DB),
         githubConfigured: Boolean(env.GITHUB_TOKEN),
+        sandboxConfigured: Boolean(env.SANDBOX_API_URL && env.SANDBOX_API_KEY),
         githubWriteProtectionConfigured: Boolean(env.SLAV_ADMIN_KEY),
         githubRepository: env.GITHUB_REPO || "slafka1996-creator/steadycity-releases",
         accessAuthRequired: env.AUTH_REQUIRED === "true",
@@ -232,7 +233,33 @@ export default {
         if(!r.ok) throw new Error("GitHub "+r.status+": "+(d.message||"API error"));
         return d;
       };
+      const sandboxEnabled=Boolean(env.SANDBOX_API_URL && env.SANDBOX_API_KEY);
+      const sandboxBase=String(env.SANDBOX_API_URL||"").replace(/\/$/,"");
+      const sandboxHeaders={"authorization":"Bearer "+(env.SANDBOX_API_KEY||""),"content-type":"application/json"};
+      let sandboxId=null;
+      const sandboxCall=async(path,options={})=>{
+        const response=await fetch(sandboxBase+path,{...options,headers:{...sandboxHeaders,...(options.headers||{})}});
+        if(!response.ok){const detail=await response.text().catch(()=>"");throw new Error("Sandbox HTTP "+response.status+": "+detail.slice(0,500));}
+        return response;
+      };
+      const runSandbox=async(command,timeout=60000)=>{
+        if(!sandboxId) throw new Error("Sandbox не создан.");
+        const response=await sandboxCall("/v1/sandbox/"+encodeURIComponent(sandboxId)+"/exec",{method:"POST",body:JSON.stringify({argv:["sh","-lc",command],timeout_ms:Math.min(120000,Math.max(1000,timeout)),cwd:"/workspace/repo"})});
+        const raw=await response.text();let stdout="",stderr="",exitCode=null,error=null;
+        for(const block of raw.split(/\r?\n\r?\n/)){let event="message",data="";for(const line of block.split(/\r?\n/)){if(line.startsWith("event:"))event=line.slice(6).trim();else if(line.startsWith("data:"))data+=line.slice(5).trim();}if(!data)continue;if(event==="stdout"||event==="stderr"){let decoded="";try{decoded=new TextDecoder().decode(Uint8Array.from(atob(data),ch=>ch.charCodeAt(0)));}catch{}if(event==="stdout")stdout+=decoded;else stderr+=decoded;}else if(event==="exit"){try{exitCode=JSON.parse(data).exit_code;}catch{}}else if(event==="error"){try{error=JSON.parse(data).error;}catch{error=data;}}}
+        return {stdout:stdout.slice(-14000),stderr:stderr.slice(-6000),exitCode,error};
+      };
+      if(sandboxEnabled){
+        try{
+          const created=await sandboxCall("/v1/sandbox",{method:"POST",body:"{}"});
+          sandboxId=String((await created.json()).id||"");
+          if(!sandboxId) throw new Error("Sandbox API не вернул id.");
+          const clone=await runSandbox("git clone --depth 1 https://github.com/"+repo+".git /workspace/repo && cd /workspace/repo && pwd && git rev-parse --short HEAD",90000);
+          if(clone.exitCode!==0) throw new Error(clone.stderr||clone.error||"Не удалось клонировать репозиторий.");
+        }catch(e){if(sandboxId) await fetch(sandboxBase+"/v1/sandbox/"+encodeURIComponent(sandboxId),{method:"DELETE",headers:sandboxHeaders}).catch(()=>{});return json({error:"Не удалось подготовить Sandbox: "+e.message},503);}
+      }
       const tools=[
+        ...(sandboxEnabled?[{type:"function",function:{name:"sandbox_exec",description:"Выполни команду Linux в изолированном Cloudflare Sandbox в /workspace/repo. Репозиторий уже клонирован. Используй для чтения и изменения файлов, установки зависимостей и запуска тестов. Команда максимум 8000 символов; timeout_ms до 120000. Возвращает stdout/stderr/exitCode. Не пытайся читать секреты или данные вне рабочей папки.",parameters:{type:"object",properties:{command:{type:"string"},timeout_ms:{type:"integer"}},required:["command"],additionalProperties:false}}}]:[]),
         {type:"function",function:{name:"list_files",description:"List files and folders in a repository directory. Use path empty for root.",parameters:{type:"object",properties:{path:{type:"string",description:"Directory path, empty for root"}} ,required:["path"],additionalProperties:false}}},
         {type:"function",function:{name:"search_code",description:"Search source code in the connected GitHub repository by exact symbol, phrase or keyword. Use this before guessing where a feature is implemented.",parameters:{type:"object",properties:{query:{type:"string",description:"Search phrase or code symbol"}},required:["query"],additionalProperties:false}}},
         {type:"function",function:{name:"read_file",description:"Read a text file from the repository main branch.",parameters:{type:"object",properties:{path:{type:"string"}},required:["path"],additionalProperties:false}}},
@@ -240,7 +267,7 @@ export default {
         {type:"function",function:{name:"stage_file",description:"Stage a complete replacement for an existing text file. Does not publish or commit it. Only allowed project folders.",parameters:{type:"object",properties:{path:{type:"string"},content:{type:"string"}},required:["path","content"],additionalProperties:false}}}
       ];
       const messages=[
-        {role:"system",content:"Ты SLAV AI Developer Agent, работаешь с репозиторием "+repo+". Самостоятельно исследуй задачу: сначала изучи AGENTS.md и README.md, затем найди релевантные файлы через search_code и list_files, изучи историю изменений через get_file_history при необходимости, прочитай релевантные файлы и внеси необходимые исправления. Пользуйся инструментами, не выдумывай содержимое файлов. Для stage_file передавай ПОЛНОЕ итоговое содержимое файла. Разрешённые пути только внутри gorodok/, src/, tools/, microcity-deploy/. Не меняй pkg/, .github/workflows/, секреты и конфигурацию деплоя. Не публикуй коммиты. В конце перечисли изученные файлы, подготовленные изменения и то, что ещё не удалось проверить. Если задача неоднозначна — задай уточняющий вопрос, не меняй файлы."},
+        {role:"system",content:"Ты SLAV AI Developer Agent, работаешь с репозиторием "+repo+". Если доступен sandbox_exec, используй изолированный Linux Sandbox: репозиторий уже клонирован в /workspace/repo. Изучи AGENTS.md и README.md, используй sandbox_exec для поиска, изменения файлов, установки зависимостей и запуска тестов. После изменений выполни тесты и git diff --check. Затем прочитай изменённые файлы и передай полное содержимое каждого изменённого файла через stage_file для GitHub review. Sandbox не имеет GitHub credentials; публикация только через защищённый workflow. Если Sandbox не подключён, используй только GitHub-инструменты чтения и stage_file. Самостоятельно исследуй задачу: сначала изучи AGENTS.md и README.md, затем найди релевантные файлы через search_code и list_files, изучи историю изменений через get_file_history при необходимости, прочитай релевантные файлы и внеси необходимые исправления. Пользуйся инструментами, не выдумывай содержимое файлов. Для stage_file передавай ПОЛНОЕ итоговое содержимое файла. Разрешённые пути только внутри gorodok/, src/, tools/, microcity-deploy/. Не меняй pkg/, .github/workflows/, секреты и конфигурацию деплоя. Не публикуй коммиты. В конце перечисли изученные файлы, подготовленные изменения и то, что ещё не удалось проверить. Если задача неоднозначна — задай уточняющий вопрос, не меняй файлы."},
         {role:"user",content:task}
       ];
       const model=env.OPENROUTER_MODEL||"nvidia/nemotron-3-ultra-550b-a55b:free";
@@ -284,7 +311,12 @@ export default {
             let args={};try{args=JSON.parse(call.function.arguments||"{}");}catch{}
             let result;
             const path=String(args.path||"").replace(/^\/+/, "");
-            if(call.function.name==="list_files"){
+            if(call.function.name==="sandbox_exec" && sandboxEnabled){
+              const command=String(args.command||"").trim();
+              if(!command||command.length>8000) throw new Error("Команда должна содержать 1–8000 символов.");
+              const resultRun=await runSandbox(command,Number(args.timeout_ms)||60000);
+              result={...resultRun,success:resultRun.exitCode===0&&!resultRun.error};
+            } else if(call.function.name==="list_files"){
               if(path.split("/").some(x=>x===".."||x===".")) throw new Error("Недопустимый путь.");
               const d=await gh("/contents/"+path.split("/").filter(Boolean).map(encodeURIComponent).join("/")+"?ref=main");
               result=(Array.isArray(d)?d:[d]).map(x=>({name:x.name,path:x.path,type:x.type,size:x.size}));
@@ -317,6 +349,7 @@ export default {
         }
         return json({ok:true,answer:"Достигнут лимит шагов за один запуск. Черновики сохранены.",staged,model});
       }catch(e){return json({error:e.message,staged},502);}
+      finally{if(sandboxId){await fetch(sandboxBase+"/v1/sandbox/"+encodeURIComponent(sandboxId),{method:"DELETE",headers:sandboxHeaders}).catch(()=>{});}}
     }
 
     // Protected GitHub write workflow: stage -> review -> explicit commit.
