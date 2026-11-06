@@ -83,11 +83,11 @@ test("assistant messages render Markdown and copyable fenced code safely", async
 test("chat streams incremental assistant text from the server", async ({ page }) => {
   await page.route("**/api/chat", async route => {
     const body = [
-      'event: delta\\ndata: {"text":"Первая часть "}',
-      'event: delta\\ndata: {"text":"и вторая часть."}',
-      'event: done\\ndata: {"conversationId":"stream-test","model":"test"}',
+      'event: delta\ndata: {"text":"Первая часть "}',
+      'event: delta\ndata: {"text":"и вторая часть."}',
+      'event: done\ndata: {"conversationId":"stream-test","model":"test"}',
       ""
-    ].join("\\n\\n");
+    ].join("\n\n");
     await route.fulfill({status:200,contentType:"text/event-stream",body});
   });
   await page.goto("/");
