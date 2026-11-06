@@ -136,6 +136,9 @@ $("#agentRun").addEventListener("click",async()=>{
   $("#agentResult").textContent="Диспетчер принимает задачу и направляет её разработчику…";
   try{
     const data=await devRequest("/api/agent",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({task})});
+    $("#devAgentState").textContent=(data.staged||[]).length?"Подготовил изменения":"Закончил анализ";
+    $("#designAgentState").textContent="Модуль в разработке";
+    $("#testAgentState").textContent="Модуль в разработке";
     $("#agentResult").textContent=(data.answer||"Готово.")+"\n\nПодготовленные файлы:\n"+((data.staged||[]).map(x=>x.path+" ("+x.characters+" символов)").join("\n")||"Нет");
   }catch(e){$("#agentResult").textContent="Ошибка агента: "+e.message;}
   finally{btn.disabled=false;floor.classList.remove("busy");}
