@@ -67,8 +67,12 @@ test("chat supports attaching text and source files", async ({ page }) => {
 test("assistant messages render Markdown and copyable fenced code safely", async ({ page }) => {
   await page.route("**/api/chat", async route => route.fulfill({
     status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({answer:"## Готово\n\n**Важное** описание.\n\n```js\nconst answer = 42;\n```",conversationId:"test-chat"})
+    contentType: "text/event-stream",
+    body: [
+      'event: delta\ndata: {"text":"## Готово\\n\\n**Важное** описание.\\n\\n```js\\nconst answer = 42;\\n```"}',
+      'event: done\ndata: {"conversationId":"test-chat","model":"test"}',
+      ""
+    ].join("\n\n")
   }));
   await page.goto("/");
   await page.locator("#prompt").fill("Покажи пример");
