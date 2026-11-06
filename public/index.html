@@ -22,7 +22,7 @@
       <div class="side-bottom"><span id="statusDot"></span><span id="statusText">Проверка подключения…</span></div>
     </aside>
     <main class="main">
-      <header><button id="menuBtn" class="menu-btn">☰</button><div><b id="modeTitle">Обычный чат</b><small>SLAV AI · Cloud</small></div><button id="exportBtn" class="export">Экспорт</button></header>
+      <header><button id="menuBtn" class="menu-btn">☰</button><div><b id="modeTitle">Обычный чат</b><small>SLAV AI · Cloud</small></div><button id="devBtn" class="export">Developer</button><button id="exportBtn" class="export">Экспорт</button></header>
       <section id="messages" class="messages">
         <div class="welcome" id="welcome">
           <div class="welcome-logo">S</div>
@@ -44,6 +44,21 @@
       </div>
     </main>
   </div>
+  <section id="devPanel" class="dev-panel" hidden>
+    <div class="dev-card">
+      <div class="dev-head"><div><b>Developer AI · GitHub</b><small>Защищённая подготовка изменений</small></div><button id="devClose" class="export">Закрыть</button></div>
+      <label>Ключ администратора <input id="devKey" type="password" autocomplete="off" placeholder="Вставь SLAV_ADMIN_KEY"></label>
+      <div class="dev-actions"><button id="repoRefresh">Файлы репозитория</button><button id="stagedRefresh">Подготовленные изменения</button></div>
+      <div id="repoTree" class="dev-list"></div>
+      <label>Путь к файлу <input id="devPath" placeholder="gorodok/путь/к/файлу"></label>
+      <div class="dev-actions"><button id="fileLoad">Загрузить файл</button><button id="fileStage">Подготовить изменения</button></div>
+      <textarea id="devContent" rows="10" spellcheck="false" placeholder="Содержимое файла появится здесь…"></textarea>
+      <div id="stagedList" class="dev-list"></div>
+      <button id="devCommit" class="dev-commit">Подтвердить и отправить коммит в main</button>
+      <p class="dev-note">Изменения сначала сохраняются в черновик. Коммит в main выполняется только после отдельного подтверждения.</p>
+      <div id="devStatus" role="status"></div>
+    </div>
+  </section>
   <script src="/app.js"></script>
 </body>
 </html>
