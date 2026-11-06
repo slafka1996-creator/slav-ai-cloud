@@ -76,6 +76,28 @@ export default {
     }
 
 
+    if (url.pathname === "/api/ci/status" && request.method === "GET") {
+      try {
+        const headers = { accept: "application/vnd.github+json", "user-agent": "SLAV-AI-Cloud/1.0" };
+        const base = "https://api.github.com/repos/slafka1996-creator/slav-ai-cloud/actions";
+        const rr = await fetch(base + "/runs?per_page=5", { headers });
+        const rd = await rr.json().catch(() => ({}));
+        if (!rr.ok) return json({ error: rd.message || "Не удалось получить CI." }, 502);
+        const run = (rd.workflow_runs || []).find(x => x.name === "Browser smoke tests");
+        if (!run) return json({ configured: true, found: false, message: "Запуски тестов не найдены." });
+        const jr = await fetch(base + "/runs/" + run.id + "/jobs", { headers });
+        const jd = await jr.json().catch(() => ({}));
+        const jobs = (jd.jobs || []).map(x => ({
+          name: x.name, status: x.status, conclusion: x.conclusion,
+          failedSteps: (x.steps || []).filter(s => s.conclusion === "failure").map(s => s.name)
+        }));
+        return json({ configured: true, found: true, run: {
+          id: run.id, number: run.run_number, status: run.status, conclusion: run.conclusion,
+          sha: run.head_sha, title: run.display_title, url: run.html_url, updatedAt: run.updated_at
+        }, jobs });
+      } catch (e) { return json({ error: "CI status error: " + e.message }, 502); }
+    }
+
     // Autonomous coding agent: inspect repository, read files, and stage edits.
     if (url.pathname === "/api/agent" && request.method === "POST") {
       if (!env.OPENROUTER_API_KEY) return json({error:"OpenRouter API key is not configured."},503);
