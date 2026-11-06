@@ -1,20 +1,14 @@
 const { test, expect } = require("@playwright/test");
 
-test("main screen opens with the AI office visible", async ({ page }) => {
+test("main screen opens as a clean AI chat without development office", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("SLAV AI · ОФИС РАЗРАБОТКИ")).toBeVisible();
-  await expect(page.getByText("Диспетчер", { exact: true })).toBeVisible();
-  await expect(page.getByText("Developer", { exact: true })).toBeVisible();
-  await expect(page.getByText("UI Designer", { exact: true })).toBeVisible();
-  await expect(page.getByText("Browser Tester", { exact: true })).toBeVisible();
-  await expect(page.locator("#agentTask")).toBeVisible();
-  await expect(page.locator("#agentRun")).toBeEnabled();
-});
-
-test("office task input accepts a task", async ({ page }) => {
-  await page.goto("/");
-  await page.locator("#agentTask").fill("Проверь интерфейс офиса");
-  await expect(page.locator("#agentTask")).toHaveValue("Проверь интерфейс офиса");
+  await expect(page.locator("#modeTitle")).toHaveText("SLAV AI");
+  await expect(page.locator("#prompt")).toBeVisible();
+  await expect(page.locator("#sendBtn")).toBeVisible();
+  await expect(page.locator(".office")).toHaveCount(0);
+  await expect(page.locator("#agentTask")).toHaveCount(0);
+  await expect(page.locator("#ciStatus")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "К офису" })).toHaveCount(0);
 });
 
 test("chat composer and send button are present", async ({ page }) => {
@@ -40,12 +34,12 @@ test("workspace navigation opens Projects and Artifacts", async ({ page }) => {
   await expect(page.locator("#artifactPreview")).toBeVisible();
 });
 
-test("workspace can return to chat and keeps office entry", async ({ page }) => {
+test("workspace can return to the clean chat view", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Проекты", exact: true }).click();
-  await page.getByRole("button", { name: "Чат и офис", exact: true }).click();
+  await page.getByRole("button", { name: "Чат", exact: true }).click();
   await expect(page.locator("#messages")).toBeVisible();
-  await expect(page.locator(".office")).toBeVisible();
+  await expect(page.locator(".office")).toHaveCount(0);
 });
 
 
