@@ -72,7 +72,7 @@ export default {
         if (url.pathname === "/api/github/status") {
           const response = await fetch("https://api.github.com/repos/" + repo, { headers });
           const data = await response.json().catch(() => ({}));
-          if (!response.ok) return json({ connected: false, error: data.message || "GitHub API error" }, response.status);
+          if (!response.ok) return json({ connected: false, error: data.message || "GitHub API error", githubStatus: response.status, repositoryChecked: repo, hint: response.status === 401 ? "Токен недействителен или истёк." : response.status === 403 ? "Проверь срок действия токена и права Metadata: Read-only и Contents: Read-only." : response.status === 404 ? "Репозиторий не найден для этого токена. Проверь Repository access и имя репозитория." : "Проверь токен и доступ к репозиторию." }, response.status);
           return json({ connected: true, repository: data.full_name, defaultBranch: data.default_branch, private: data.private });
         }
         if (url.pathname === "/api/github/tree") {
