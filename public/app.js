@@ -27,7 +27,7 @@ async function send() {
   if (!message && !attachedFiles.length) return;
   promptBox.value = "";
   promptBox.style.height = "auto";
-  addMessage("user",message + (attachedFiles.length ? "\\n\\n📎 "+attachedFiles.map(f=>f.name).join(", ") : ""));
+  addMessage("user",message + (attachedFiles.length ? "\n\n📎 "+attachedFiles.map(f=>f.name).join(", ") : ""));
   const filesForRequest = attachedFiles.slice();
   attachedFiles = [];
   renderAttachments();
@@ -42,7 +42,7 @@ async function send() {
     const res = await fetch("/api/chat", {
       method:"POST",
       headers:{"content-type":"application/json"},
-      body:JSON.stringify({message: message || "Проанализируй прикреплённые файлы.", attachmentContext: attachedFiles.map(f=>"ФАЙЛ: "+f.name+"\\n"+f.content).join("\\n\\n"), mode,conversationId})
+      body:JSON.stringify({message: message || "Проанализируй прикреплённые файлы.", attachmentContext: filesForRequest.map(f=>"ФАЙЛ: "+f.name+"\n"+f.content).join("\n\n"), mode,conversationId})
     });
     const data = await res.json();
     waiting.remove();
