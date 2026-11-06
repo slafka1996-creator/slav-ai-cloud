@@ -131,10 +131,9 @@ $("#devCommit").addEventListener("click",async()=>{
 $("#agentRun").addEventListener("click",async()=>{
   const task=$("#agentTask").value.trim();
   if(!task){$("#agentResult").textContent="Опиши задачу для агента.";return;}
-  if(!devAdminKey){$("#agentResult").textContent="Сначала введи ключ администратора.";return;}
   const btn=$("#agentRun");btn.disabled=true;$("#agentResult").textContent="Агент изучает проект, читает файлы и готовит решение…";
   try{
-    const data=await devRequest("/api/agent",{method:"POST",headers:devHeaders(),body:JSON.stringify({task})});
+    const data=await devRequest("/api/agent",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({task})});
     $("#agentResult").textContent=(data.answer||"Готово.")+"\n\nПодготовленные файлы:\n"+((data.staged||[]).map(x=>x.path+" ("+x.characters+" символов)").join("\n")||"Нет");
     $("#stagedRefresh").click();
   }catch(e){$("#agentResult").textContent="Ошибка агента: "+e.message;}
