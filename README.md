@@ -53,3 +53,32 @@ Sandbox доступен на Workers Paid plan. Для развёртывани
 Если Sandbox не настроен, Developer Agent продолжает работать в прежнем режиме GitHub-инструментов чтения и подготовки изменений. Не добавляйте ключ Sandbox в GitHub, клиентский JavaScript или пользовательские сообщения. Временный Sandbox создаётся на каждый запуск и удаляется после завершения. Исходники загружаются в него архивом через GitHub API с серверной авторизацией; GitHub-токен остаётся в основном Worker и не передаётся в контейнер. Размер архива ограничен 32 МиБ на стороне Sandbox Bridge.
 
 Документация: https://developers.cloudflare.com/sandbox/ и https://developers.cloudflare.com/sandbox/sdk/bridge/http-api/
+
+
+## Telegram-бот SLAV AI
+
+В Worker добавлен Telegram webhook с личной историей каждого пользователя.
+
+### Настройка
+
+1. Создайте бота через @BotFather и скопируйте токен.
+2. В Cloudflare → Workers & Pages → `slav-ai-cloud` → Settings → Variables and Secrets добавьте секреты:
+   - `TELEGRAM_BOT_TOKEN` — токен от BotFather.
+   - `TELEGRAM_WEBHOOK_SECRET` — случайная строка 32–64 символа из латинских букв, цифр, `_` и `-`.
+3. Убедитесь, что у Worker подключена D1 с binding `DB`, а также настроен хотя бы один AI-ключ: `OPENROUTER_API_KEY` или `GEMINI_API_KEY`.
+4. После публикации установите webhook. Подставьте значения локально, не отправляйте токены в чат и не коммитьте их:
+
+```bash
+curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
+  -d "url=https://slav-ai-cloud.slafka1996.workers.dev/telegram/webhook" \
+  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>" \
+  -d "allowed_updates=[\"message\"]"
+```
+
+5. Откройте бота в Telegram и отправьте `/start`.
+
+Команды: `/new` — новый диалог, `/mode chat`, `/mode think`, `/mode code`, `/mode research`, `/help`.
+
+Бот пока принимает текстовые сообщения в личном чате. История и режим хранятся раздельно по Telegram chat ID и user ID; групповые чаты и вложения пока не обрабатываются. Ограничение — 12 запросов в минуту на пользователя. Ответы длиннее лимита Telegram автоматически делятся на сообщения.
+
+Webhook проверяет заголовок Telegram `X-Telegram-Bot-Api-Secret-Token`; токен бота и ключи моделей остаются только в Cloudflare Secrets. Само добавление кода в GitHub не разворачивает Worker и не устанавливает webhook автоматически.
