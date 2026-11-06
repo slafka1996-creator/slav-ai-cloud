@@ -28,3 +28,22 @@ test("orange theme stylesheet is loaded", async ({ page }) => {
   const accent = await page.locator("body").evaluate(el => getComputedStyle(el).getPropertyValue("--accent").trim());
   expect(accent).toBe("#ff861f");
 });
+
+
+test("workspace navigation opens Projects and Artifacts", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Проекты", exact: true }).click();
+  await expect(page.locator("#projectsView")).toBeVisible();
+  await page.getByRole("button", { name: "Artifacts", exact: true }).click();
+  await expect(page.locator("#artifactsView")).toBeVisible();
+  await expect(page.locator("#artifactPrompt")).toBeVisible();
+  await expect(page.locator("#artifactPreview")).toBeVisible();
+});
+
+test("workspace can return to chat and keeps office entry", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Проекты", exact: true }).click();
+  await page.getByRole("button", { name: "Чат и офис", exact: true }).click();
+  await expect(page.locator("#messages")).toBeVisible();
+  await expect(page.locator(".office")).toBeVisible();
+});
