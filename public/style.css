@@ -119,3 +119,5 @@ body{background:#0b0b0c;color:#fff4e9}
 .code-toolbar button{border:1px solid #414b5e;border-radius:6px;background:#242b39;color:#e5eaf3;padding:5px 9px;font-size:11px;cursor:pointer}
 .code-block pre{margin:0;padding:14px;overflow:auto;max-width:100%;color:#e5eaf3;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre}
 .code-block pre code{font:inherit}
+
+.composer .stop-btn{background:#48251b;border:1px solid #a64b24;color:#ffb08a}.composer .stop-btn[hidden]{display:none}
