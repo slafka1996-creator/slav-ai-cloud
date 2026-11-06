@@ -114,7 +114,7 @@ async function handleTelegramWebhook(request, env) {
   const text = message.text.trim().slice(0, 12000);
   if (!text) return json({ ok: true });
   const send = async value => {
-    const chunks = String(value || "").match(/[\\s\\S]{1,3900}/g) || ["Пустой ответ."];
+    const chunks = String(value || "").match(/[\s\S]{1,3900}/g) || ["Пустой ответ."];
     for (const chunk of chunks) await telegramApi(env, "sendMessage", { chat_id: chatId, text: chunk, disable_web_page_preview: true });
   };
   try {
@@ -139,7 +139,7 @@ async function handleTelegramWebhook(request, env) {
     }
     if (text === "/mode" || text.startsWith("/mode ")) {
       const modes = { chat: "Обычный чат", think: "Глубокий анализ", code: "Программирование", research: "Исследование" };
-      const requested = text.split(/\\s+/)[1];
+      const requested = text.split(/\s+/)[1];
       if (!requested) { await send("Выбери режим командой:\\n/mode chat\\n/mode think\\n/mode code\\n/mode research"); return json({ ok: true }); }
       if (!modes[requested]) { await send("Неизвестный режим. Доступно: chat, think, code, research."); return json({ ok: true }); }
       const now = new Date().toISOString(), conv = session?.conversation_id || id();
