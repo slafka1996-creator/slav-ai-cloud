@@ -493,19 +493,13 @@ export default {
     }
 
     if (url.pathname === "/api/chat" && request.method === "POST") {
-      if (!env.OPENROUTER_API_KEY && !env.GEMINI_API_KEY) {
-        return json({ error: "Добавь секрет OPENROUTER_API_KEY в настройках Worker." }, 503);
-      }
-
+      if (!env.OPENROUTER_API_KEY && !env.GEMINI_API_KEY) return json({ error: "Добавь API-ключ модели в настройках Worker." }, 503);
       let body;
-      try { body = await request.json(); }
-      catch { return json({ error: "Некорректный JSON-запрос." }, 400); }
-
+      try { body = await request.json(); } catch { return json({ error: "Некорректный JSON-запрос." }, 400); }
       const userText = String(body.message || "").trim().slice(0, 30000);
       const attachmentContext = String(body.attachmentContext || "").slice(0, 100000);
       const message = (userText + (attachmentContext ? "\n\n[Содержимое прикреплённых файлов]\n" + attachmentContext : "")).trim().slice(0, 130000);
       if (!message) return json({ error: "Напиши сообщение." }, 400);
-
       const conversationId = String(body.conversationId || id());
       const modePrompts = {
         chat: "Отвечай естественно, понятно и по делу.",
@@ -516,125 +510,89 @@ export default {
       let projectContext = "";
       if (body.projectId && env.DB) {
         const project = await env.DB.prepare("SELECT name,description,instructions FROM projects WHERE id=?").bind(String(body.projectId)).first();
-        if (project) projectContext = "\\n\\nКонтекст активного проекта: " + project.name + "\\nОписание: " + project.description + "\\nИнструкции: " + project.instructions + "\\nУчитывай эти сведения в текущем запросе и последующих сообщениях этого чата.";
+        if (project) projectContext = "\n\nКонтекст активного проекта: " + project.name + "\nОписание: " + project.description + "\nИнструкции: " + project.instructions;
       }
       const system = "Ты SLAV AI — русскоязычный универсальный AI-помощник. " +
         (modePrompts[body.mode] || modePrompts.chat) +
         " Отвечай на русском, если пользователь не попросил другой язык. " +
+        "Используй Markdown: заголовки, списки, таблицы и fenced code blocks там, где это улучшает читаемость. " +
         "Не заявляй о доступе к браузеру, GitHub, файлам или компьютеру, если такого инструмента нет." + projectContext;
-
       let history = [];
       if (env.DB) {
         try {
-          const rows = await env.DB.prepare(
-            "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 30"
-          ).bind(conversationId).all();
-          history = (rows.results || []).reverse().map(row => ({
-            role: row.role,
-            content: row.content
-          }));
-        } catch (e) {
-          return json({ error: "Ошибка базы данных: " + e.message }, 500);
-        }
+          const rows = await env.DB.prepare("SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 30").bind(conversationId).all();
+          history = (rows.results || []).reverse().map(row => ({ role: row.role, content: row.content }));
+        } catch (e) { return json({ error: "Ошибка базы данных: " + e.message }, 500); }
       }
-
-      let answer = "";
-      let providerError = "";
-
-      // Основная модель — бесплатная NVIDIA Nemotron через OpenRouter.
-      if (env.OPENROUTER_API_KEY) {
-        const model = env.SLAV_CHAT_MODEL || env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free";
-        try {
-          const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              "authorization": "Bearer " + env.OPENROUTER_API_KEY,
-              "content-type": "application/json",
-              "HTTP-Referer": "https://slav-ai-cloud.slafka1996.workers.dev",
-              "X-Title": "SLAV AI"
-            },
-            body: JSON.stringify({
-              model,
-              messages: [
-                { role: "system", content: system },
-                ...history,
-                { role: "user", content: message }
-              ],
-              max_tokens: 8192
-            })
-          });
-          const result = await upstream.json().catch(() => ({}));
-          if (upstream.ok) {
-            answer = String(result.choices?.[0]?.message?.content || "").trim();
-          } else {
-            providerError = result.error?.message || ("OpenRouter HTTP " + upstream.status);
-          }
-        } catch (e) {
-          providerError = e.message;
-        }
-      }
-
-      // Резервный маршрут Gemini, если он настроен и бесплатный маршрут временно недоступен.
-      if (!answer && env.GEMINI_API_KEY) {
-        const model = env.GEMINI_CHAT_MODEL || "gemini-3.8-flash";
-        const geminiHistory = history.map(row => ({
-          role: row.role === "assistant" ? "model" : "user",
-          parts: [{ text: row.content }]
-        }));
-        try {
-          const upstream = await fetch(
-            "https://generativelanguage.googleapis.com/v1beta/models/" +
-              encodeURIComponent(model) + ":generateContent?key=" +
-              encodeURIComponent(env.GEMINI_API_KEY),
-            {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({
-                systemInstruction: { parts: [{ text: system }] },
-                contents: [...geminiHistory, { role: "user", parts: [{ text: message }] }],
-                generationConfig: { maxOutputTokens: 8192 }
-              })
+      const model = env.SLAV_CHAT_MODEL || env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free";
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(controller) {
+          let answer = "";
+          const emit = (event, data) => controller.enqueue(encoder.encode("event: " + event + "\ndata: " + JSON.stringify(data) + "\n\n"));
+          try {
+            let streamed = false, providerError = "";
+            if (env.OPENROUTER_API_KEY) {
+              const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+                method: "POST",
+                headers: { "authorization": "Bearer " + env.OPENROUTER_API_KEY, "content-type": "application/json", "HTTP-Referer": "https://slav-ai-cloud.slafka1996.workers.dev", "X-Title": "SLAV AI" },
+                body: JSON.stringify({ model, messages: [{ role: "system", content: system }, ...history, { role: "user", content: message }], max_tokens: 8192, stream: true })
+              });
+              if (upstream.ok && upstream.body) {
+                streamed = true;
+                const reader = upstream.body.getReader(), decoder = new TextDecoder();
+                let buffer = "";
+                while (true) {
+                  const { value, done } = await reader.read();
+                  if (done) break;
+                  buffer += decoder.decode(value, { stream: true });
+                  const lines = buffer.split("\n"); buffer = lines.pop() || "";
+                  for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed.startsWith("data:")) continue;
+                    const payload = trimmed.slice(5).trim();
+                    if (payload === "[DONE]") continue;
+                    try {
+                      const packet = JSON.parse(payload);
+                      const delta = packet.choices?.[0]?.delta?.content;
+                      if (typeof delta === "string" && delta) { answer += delta; emit("delta", { text: delta }); }
+                      const reason = packet.choices?.[0]?.finish_reason;
+                      if (reason === "error") throw new Error(packet.choices?.[0]?.error?.message || "Ошибка потока модели.");
+                    } catch (e) { if (e instanceof SyntaxError) continue; throw e; }
+                  }
+                }
+              } else {
+                const errorData = await upstream.json().catch(() => ({}));
+                providerError = errorData.error?.message || ("OpenRouter HTTP " + upstream.status);
+              }
             }
-          );
-          const result = await upstream.json().catch(() => ({}));
-          if (upstream.ok) {
-            answer = (result.candidates?.[0]?.content?.parts || [])
-              .map(part => part.text || "").join("").trim();
-          } else {
-            providerError = result.error?.message || ("Gemini HTTP " + upstream.status);
-          }
-        } catch (e) {
-          providerError = e.message;
+            if (!streamed && env.GEMINI_API_KEY) {
+              const geminiModel = env.GEMINI_CHAT_MODEL || "gemini-3.8-flash";
+              const geminiHistory = history.map(row => ({ role: row.role === "assistant" ? "model" : "user", parts: [{ text: row.content }] }));
+              const fallback = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(geminiModel) + ":generateContent?key=" + encodeURIComponent(env.GEMINI_API_KEY), {
+                method: "POST", headers: { "content-type": "application/json" },
+                body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [...geminiHistory, { role: "user", parts: [{ text: message }] }], generationConfig: { maxOutputTokens: 8192 } })
+              });
+              const data = await fallback.json().catch(() => ({}));
+              if (fallback.ok) {
+                answer = (data.candidates?.[0]?.content?.parts || []).map(part => part.text || "").join("").trim();
+                if (answer) emit("delta", { text: answer });
+              } else providerError = data.error?.message || ("Gemini HTTP " + fallback.status);
+            }
+            if (!answer.trim()) throw new Error(providerError || "Модель не вернула ответ.");
+            if (env.DB) {
+              const now = new Date().toISOString();
+              await env.DB.prepare("INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)").bind(conversationId, message.slice(0, 80), now, now).run();
+              await env.DB.prepare("INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)").bind(id(), conversationId, "user", message, now).run();
+              await env.DB.prepare("INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)").bind(id(), conversationId, "assistant", answer, now).run();
+              await env.DB.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").bind(now, conversationId).run();
+            }
+            emit("done", { conversationId, model: streamed ? model : (env.GEMINI_CHAT_MODEL || "gemini-3.8-flash") });
+          } catch (e) { emit("error", { error: e.message || "Ошибка генерации." }); }
+          finally { controller.close(); }
         }
-      }
-
-      if (!answer) {
-        return json({
-          error: providerError || "Модель не вернула текстовый ответ. Проверь API-ключ и доступность бесплатной модели."
-        }, 502);
-      }
-
-      if (env.DB) {
-        try {
-          const now = new Date().toISOString();
-          await env.DB.prepare(
-            "INSERT OR IGNORE INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)"
-          ).bind(conversationId, message.slice(0, 80), now, now).run();
-          await env.DB.prepare(
-            "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
-          ).bind(id(), conversationId, "user", message, now).run();
-          await env.DB.prepare(
-            "INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)"
-          ).bind(id(), conversationId, "assistant", answer, now).run();
-          await env.DB.prepare(
-            "UPDATE conversations SET updated_at = ? WHERE id = ?"
-          ).bind(now, conversationId).run();
-        } catch (e) {
-          return json({ error: "Ответ получен, но не удалось сохранить историю: " + e.message, answer, conversationId }, 500);
-        }
-      }
-
-      return json({ answer, conversationId, model: env.SLAV_CHAT_MODEL || env.OPENROUTER_MODEL || (env.GEMINI_CHAT_MODEL || "gemini-3.8-flash") });
+      });
+      return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache, no-transform", "connection": "keep-alive", "x-content-type-options": "nosniff" } });
     }
 
     if (url.pathname === "/api/conversations" && request.method === "GET") {
