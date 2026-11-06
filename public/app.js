@@ -135,7 +135,6 @@ $("#agentRun").addEventListener("click",async()=>{
   try{
     const data=await devRequest("/api/agent",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({task})});
     $("#agentResult").textContent=(data.answer||"Готово.")+"\n\nПодготовленные файлы:\n"+((data.staged||[]).map(x=>x.path+" ("+x.characters+" символов)").join("\n")||"Нет");
-    $("#stagedRefresh").click();
   }catch(e){$("#agentResult").textContent="Ошибка агента: "+e.message;}
   finally{btn.disabled=false;}
 });
