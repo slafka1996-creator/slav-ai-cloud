@@ -5,6 +5,42 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 
 const id = () => crypto.randomUUID();
 
+async function verifyCloudflareAccess(request, env) {
+  const required = env.AUTH_REQUIRED === "true";
+  const team = String(env.CF_ACCESS_TEAM_DOMAIN || "").replace(/\/$/, "");
+  const audience = String(env.CF_ACCESS_AUD || "");
+  if (!team || !audience) return required
+    ? { ok: false, status: 503, error: "Защита не настроена: задай CF_ACCESS_TEAM_DOMAIN и CF_ACCESS_AUD." }
+    : { ok: true, user: null, configured: false };
+  const token = request.headers.get("CF-Access-Jwt-Assertion");
+  if (!token) return { ok: false, status: 401, error: "Требуется вход через Cloudflare Access." };
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) throw new Error("invalid token");
+    const decode = part => JSON.parse(atob(part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=")));
+    const header = decode(parts[0]), claims = decode(parts[1]);
+    if (header.alg !== "RS256" || !header.kid) throw new Error("unsupported signature");
+    const issuer = team.startsWith("https://") ? team : "https://" + team;
+    if (claims.iss !== issuer) throw new Error("issuer mismatch");
+    const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+    if (!aud.includes(audience)) throw new Error("audience mismatch");
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof claims.exp !== "number" || claims.exp <= now || (claims.nbf && claims.nbf > now + 60)) throw new Error("token time invalid");
+    const response = await fetch(issuer + "/cdn-cgi/access/certs");
+    if (!response.ok) throw new Error("keys unavailable");
+    const certs = await response.json();
+    const jwk = (certs.keys || []).find(key => key.kid === header.kid);
+    if (!jwk) throw new Error("key not found");
+    const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    const signature = Uint8Array.from(atob(parts[2].replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(parts[2].length / 4) * 4, "=")), ch => ch.charCodeAt(0));
+    const valid = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signature, new TextEncoder().encode(parts[0] + "." + parts[1]));
+    if (!valid) throw new Error("bad signature");
+    return { ok: true, user: String(claims.email || claims.sub || "access-user"), configured: true };
+  } catch {
+    return { ok: false, status: 401, error: "Недействительный токен Cloudflare Access." };
+  }
+}
+
 async function ensureDatabase(env) {
   if (!env.DB) return;
   await env.DB.prepare(`
@@ -61,6 +97,11 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if (url.pathname.startsWith("/api/")) {
+      const access = await verifyCloudflareAccess(request, env);
+      if (!access.ok) return json({ error: access.error }, access.status);
+    }
+
     if (env.DB && url.pathname !== "/health" && url.pathname !== "/api/ci/status") {
       try {
         await ensureDatabase(env);
@@ -81,7 +122,7 @@ export default {
         databaseConfigured: Boolean(env.DB),
         githubConfigured: Boolean(env.GITHUB_TOKEN),
         githubWriteProtectionConfigured: Boolean(env.SLAV_ADMIN_KEY),
-        githubRepository: env.GITHUB_REPO || "slafka1996-creator/steadycity-releases"
+        githubRepository: env.GITHUB_REPO || "slafka1996-creator/steadycity-releases",\n        accessAuthRequired: env.AUTH_REQUIRED === "true",\n        accessAuthConfigured: Boolean(env.CF_ACCESS_TEAM_DOMAIN && env.CF_ACCESS_AUD)
       });
     }
 
