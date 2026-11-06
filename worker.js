@@ -123,7 +123,29 @@ export default {
           if(!msg) throw new Error("Модель не вернула ответ.");
           messages.push(msg);
           const calls=msg.tool_calls||[];
-          if(!calls.length) return json({ok:true,answer:msg.content||"Агент завершил работу без текстового отчёта.",staged,model});
+          if(!calls.length) {
+            const stagedRows=[];
+            for(const item of staged){
+              const row=await env.DB.prepare("SELECT path,content FROM github_staged_files WHERE path=?").bind(item.path).first();
+              if(row) stagedRows.push({path:row.path,content:row.content});
+            }
+            const bundle=stagedRows.map(x=>"FILE: "+x.path+"\\n"+x.content).join("\\n\\n").slice(0,18000);
+            const review=async(role,instruction)=>{
+              if(!bundle) return "Нет подготовленных файлов для проверки.";
+              const r=await fetch("https://openrouter.ai/api/v1/chat/completions",{
+                method:"POST",headers:{"authorization":"Bearer "+env.OPENROUTER_API_KEY,"content-type":"application/json","HTTP-Referer":"https://slav-ai-cloud.slafka1996.workers.dev","X-Title":"SLAV AI Studio - "+role},
+                body:JSON.stringify({model,messages:[{role:"system",content:instruction},{role:"user",content:"Задача пользователя: "+task+"\\n\\nПодготовленные изменения:\\n"+bundle}],max_tokens:1400})
+              });
+              const d=await r.json().catch(()=>({}));
+              if(!r.ok) return "Проверка не выполнена: "+(d.error?.message||r.status);
+              return d.choices?.[0]?.message?.content||"Нет ответа.";
+            };
+            const [designReview,testReview]=await Promise.all([
+              review("UI Designer","Ты UI Designer в команде SLAV AI. Проверь подготовленные изменения с точки зрения интерфейса, UX, визуальной целостности, адаптивности и доступности. Не утверждай, что менял код. Дай краткий вердикт и конкретные замечания."),
+              review("Browser Tester","Ты QA/Browser Tester команды SLAV AI. Проведи статический анализ подготовленных изменений: логические ошибки, риски регрессии, синтаксические подозрения, граничные случаи. Не заявляй, что реально запускал браузер или тесты. Укажи найденные проблемы и что нужно проверить запуском.")
+            ]);
+            return json({ok:true,answer:msg.content||"Developer завершил работу.",staged,model,team:{dispatcher:"Распределил задачу",developer:"Подготовил изменения",designer:designReview,tester:testReview}});
+          }
           for(const call of calls){
             let args={};try{args=JSON.parse(call.function.arguments||"{}");}catch{}
             let result;
