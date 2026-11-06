@@ -47,3 +47,11 @@ test("workspace can return to chat and keeps office entry", async ({ page }) => 
   await expect(page.locator("#messages")).toBeVisible();
   await expect(page.locator(".office")).toBeVisible();
 });
+
+
+test("chat history controls are available", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#chatHistory")).toBeVisible();
+  await expect(page.locator("#chatSearch")).toBeVisible();
+  await expect(page.locator("#refreshChats")).toBeVisible();
+});
