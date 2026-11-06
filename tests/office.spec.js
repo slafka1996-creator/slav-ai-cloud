@@ -78,3 +78,20 @@ test("assistant messages render Markdown and copyable fenced code safely", async
   await expect(page.locator("#messages .code-block code")).toContainText("const answer = 42;");
   await expect(page.locator("#messages .copy-code")).toBeVisible();
 });
+
+
+test("chat streams incremental assistant text from the server", async ({ page }) => {
+  await page.route("**/api/chat", async route => {
+    const body = [
+      'event: delta\\ndata: {"text":"Первая часть "}',
+      'event: delta\\ndata: {"text":"и вторая часть."}',
+      'event: done\\ndata: {"conversationId":"stream-test","model":"test"}',
+      ""
+    ].join("\\n\\n");
+    await route.fulfill({status:200,contentType:"text/event-stream",body});
+  });
+  await page.goto("/");
+  await page.locator("#prompt").fill("Потоковый тест");
+  await page.locator("#sendBtn").click();
+  await expect(page.locator("#messages .message.assistant .content")).toContainText("Первая часть и вторая часть.");
+});
