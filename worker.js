@@ -13,7 +13,7 @@ export default {
       return json({
         ok: true,
         app: "SLAV AI",
-        model: env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra:free",
+        model: env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free",
         provider: env.OPENROUTER_API_KEY ? "OpenRouter" : "Gemini",
         openrouterConfigured: Boolean(env.OPENROUTER_API_KEY),
         geminiConfigured: Boolean(env.GEMINI_API_KEY),
@@ -66,7 +66,7 @@ export default {
 
       // Основная модель — бесплатная NVIDIA Nemotron через OpenRouter.
       if (env.OPENROUTER_API_KEY) {
-        const model = env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra:free";
+        const model = env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra-550b-a55b:free";
         try {
           const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
