@@ -37,3 +37,9 @@ body{background:#0b0b0c;color:#fff4e9}
 .dev-card input,.dev-card textarea{background:#100e0c;border-color:#68421f;color:#fff4e9}
 .dev-actions button{background:#2a1c12;border-color:#70421f;color:#ffe0c3}
 @media(max-width:700px){.office-main{padding:9px 8px 0}.office{padding:9px;border-radius:12px}.office-floor{min-height:170px}.office-top b{font-size:10px}.main header{gap:7px}.main header small{font-size:10px}.export{font-size:11px;padding:7px 8px}}
+.ci-status{margin-top:10px;padding:10px 12px;border:1px solid #49301f;border-radius:10px;background:#100e0c;color:#c9b29f;font-size:13px;line-height:1.45}
+.ci-status[data-state="success"]{border-color:#376b48;color:#9fe0b3}
+.ci-status[data-state="failure"]{border-color:#9a4327;color:#ffb18c}
+.ci-status[data-state="running"]{border-color:#79511f;color:#ffd08d}
+.ci-fix{margin-top:8px;padding:9px 12px;border:1px solid #a6531e;border-radius:9px;background:#3a2113;color:#ffd1aa;font-weight:700}
+.ci-fix[hidden]{display:none}
