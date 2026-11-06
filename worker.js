@@ -17,6 +17,7 @@ export default {
         provider: env.OPENROUTER_API_KEY ? "OpenRouter" : "Gemini",
         openrouterConfigured: Boolean(env.OPENROUTER_API_KEY),
         geminiConfigured: Boolean(env.GEMINI_API_KEY),
+        geminiFallbackModel: "gemini-3.8-flash",
         databaseConfigured: Boolean(env.DB)
       });
     }
@@ -98,7 +99,7 @@ export default {
 
       // Резервный маршрут Gemini, если он настроен и бесплатный маршрут временно недоступен.
       if (!answer && env.GEMINI_API_KEY) {
-        const model = env.GEMINI_MODEL || "gemini-2.5-flash";
+        const model = "gemini-3.8-flash";
         const geminiHistory = history.map(row => ({
           role: row.role === "assistant" ? "model" : "user",
           parts: [{ text: row.content }]
