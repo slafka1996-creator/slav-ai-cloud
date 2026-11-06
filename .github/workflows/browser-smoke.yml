@@ -20,7 +20,17 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install
+      - name: Check JavaScript syntax
+        run: |
+          node --check public/app.js
+          node --check worker.js
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Run real browser checks
         run: npm test
+      - name: Publish test summary
+        if: always()
+        run: |
+          echo '## SLAV AI automated checks' >> $GITHUB_STEP_SUMMARY
+          echo '- JavaScript syntax checks: completed before browser tests' >> $GITHUB_STEP_SUMMARY
+          echo '- Playwright Chromium smoke tests: see test output above' >> $GITHUB_STEP_SUMMARY
