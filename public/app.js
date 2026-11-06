@@ -4,6 +4,7 @@ const promptBox = $("#prompt");
 let mode = "chat";
 let conversationId = null;
 let transcript = [];
+let attachedFiles = [];
 const titles = {chat:"Обычный чат",think:"Глубокий анализ",code:"Программирование",research:"Исследование"};
 
 function addMessage(role, text, error=false) {
@@ -23,10 +24,13 @@ function addMessage(role, text, error=false) {
 }
 async function send() {
   const message = promptBox.value.trim();
-  if (!message) return;
+  if (!message && !attachedFiles.length) return;
   promptBox.value = "";
   promptBox.style.height = "auto";
-  addMessage("user",message);
+  addMessage("user",message + (attachedFiles.length ? "\\n\\n📎 "+attachedFiles.map(f=>f.name).join(", ") : ""));
+  const filesForRequest = attachedFiles.slice();
+  attachedFiles = [];
+  renderAttachments();
   const button = $("#sendBtn");
   button.disabled = true;
   const waiting = document.createElement("div");
@@ -38,7 +42,7 @@ async function send() {
     const res = await fetch("/api/chat", {
       method:"POST",
       headers:{"content-type":"application/json"},
-      body:JSON.stringify({message,mode,conversationId})
+      body:JSON.stringify({message: message || "Проанализируй прикреплённые файлы.", attachmentContext: attachedFiles.map(f=>"ФАЙЛ: "+f.name+"\\n"+f.content).join("\\n\\n"), mode,conversationId})
     });
     const data = await res.json();
     waiting.remove();
@@ -55,6 +59,10 @@ async function send() {
   }
 }
 $("#sendBtn").addEventListener("click",send);
+const fileInput=$("#fileInput");
+function renderAttachments(){const box=$("#attachmentList");if(!box)return;box.hidden=!attachedFiles.length;box.replaceChildren();attachedFiles.forEach((f,i)=>{const chip=document.createElement("span");chip.className="attachment-chip";chip.textContent="📎 "+f.name+" ";const remove=document.createElement("button");remove.type="button";remove.textContent="×";remove.setAttribute("aria-label","Убрать "+f.name);remove.onclick=()=>{attachedFiles.splice(i,1);renderAttachments();};chip.append(remove);box.append(chip);});}
+$("#attachBtn")?.addEventListener("click",()=>fileInput.click());
+fileInput?.addEventListener("change",async()=>{for(const file of [...fileInput.files]){if(file.size>100000){alert(file.name+": максимум 100 КБ на файл.");continue;}try{const content=await file.text();if(content.includes("\\u0000")){alert(file.name+": бинарные файлы пока не поддерживаются.");continue;}attachedFiles.push({name:file.name,content});}catch{alert("Не удалось прочитать "+file.name);}}fileInput.value="";renderAttachments();});
 promptBox.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
 promptBox.addEventListener("input",()=>{promptBox.style.height="auto";promptBox.style.height=Math.min(promptBox.scrollHeight,180)+"px";});
 async function startNewChat(){conversationId=null;transcript=[];messages.innerHTML='<div class="welcome" id="welcome"><div class="welcome-logo">S</div><h1>Привет! Я SLAV AI.</h1><p>Чем займёмся сегодня?</p><div class="suggestions"><button data-prompt="Помоги мне составить план проекта">Составить план проекта</button><button data-prompt="Напиши и объясни код для моей задачи">Помочь с программированием</button><button data-prompt="Объясни сложную тему простыми словами">Объяснить сложную тему</button></div></div>';  document.querySelectorAll('.workspace-tab').forEach(b=>b.classList.toggle('active',b.dataset.view==='chat'));
