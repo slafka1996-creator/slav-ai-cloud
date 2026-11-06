@@ -153,7 +153,7 @@ export default {
       const system = "Ты создаёшь готовые интерактивные веб-артефакты для SLAV AI. Верни ТОЛЬКО полный самодостаточный HTML-документ с CSS и JavaScript внутри. Без Markdown-ограждений, пояснений и внешних зависимостей. Интерфейс адаптивный, аккуратный, доступный. Не используй сетевые запросы, кроме явно необходимых пользователю.";
       let html = "", error = "";
       if (env.OPENROUTER_API_KEY) {
-        const r = await fetch("https://openrouter.ai/api/v1/chat/completions",{method:"POST",headers:{"authorization":"Bearer "+env.OPENROUTER_API_KEY,"content-type":"application/json","HTTP-Referer":"https://slav-ai-cloud.slafrika1996.workers.dev","X-Title":"SLAV AI Artifacts"},body:JSON.stringify({model:env.OPENROUTER_MODEL||"nvidia/nemotron-3-ultra-550b-a55b:free",messages:[{role:"system",content:system},{role:"user",content:prompt}],max_tokens:7000})});
+        const r = await fetch("https://openrouter.ai/api/v1/chat/completions",{method:"POST",headers:{"authorization":"Bearer "+env.OPENROUTER_API_KEY,"content-type":"application/json","HTTP-Referer":"https://slav-ai-cloud.slafka1996.workers.dev","X-Title":"SLAV AI Artifacts"},body:JSON.stringify({model:env.OPENROUTER_MODEL||"nvidia/nemotron-3-ultra-550b-a55b:free",messages:[{role:"system",content:system},{role:"user",content:prompt}],max_tokens:7000})});
         const d=await r.json().catch(()=>({}));
         if(r.ok) html=String(d.choices?.[0]?.message?.content||"").trim(); else error=d.error?.message||("OpenRouter HTTP "+r.status);
       }
