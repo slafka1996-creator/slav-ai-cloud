@@ -97,11 +97,11 @@ export default {
         if (url.pathname === "/api/github/write/stage" && request.method === "POST") {
           const body = await request.json().catch(() => null);
           if (!body) return json({ error: "Некорректный JSON." }, 400);
-          const path = String(body.path || "").replace(/^\\/+/, "");
+          const path = String(body.path || "").replace(/^\/+/, "");
           const fileContent = body.content;
           if (!path || path.length > 240 || path.split("/").some(part => !part || part === "." || part === "..") ||
               path.startsWith(".github/workflows/") || path.startsWith("pkg/") ||
-              !/^(gorodok|src|tools|microcity-deploy)\\//.test(path)) {
+              !/^(gorodok|src|tools|microcity-deploy)\/.test(path)) {
             return json({ error: "Путь запрещён. Разрешены только файлы внутри gorodok/, src/, tools/ и microcity-deploy/; pkg/ и workflows защищены." }, 400);
           }
           if (typeof fileContent !== "string" || fileContent.length > 500000) {
