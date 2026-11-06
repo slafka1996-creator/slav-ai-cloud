@@ -5,6 +5,7 @@ let mode = "chat";
 let conversationId = null;
 let transcript = [];
 let attachedFiles = [];
+let activeProjectId = null;
 const titles = {chat:"Обычный чат",think:"Глубокий анализ",code:"Программирование",research:"Исследование"};
 
 function addMessage(role, text, error=false) {
@@ -42,7 +43,7 @@ async function send() {
     const res = await fetch("/api/chat", {
       method:"POST",
       headers:{"content-type":"application/json"},
-      body:JSON.stringify({message: message || "Проанализируй прикреплённые файлы.", attachmentContext: filesForRequest.map(f=>"ФАЙЛ: "+f.name+"\n"+f.content).join("\n\n"), mode,conversationId})
+      body:JSON.stringify({message: message || "Проанализируй прикреплённые файлы.", attachmentContext: filesForRequest.map(f=>"ФАЙЛ: "+f.name+"\n"+f.content).join("\n\n"), projectId:activeProjectId, mode,conversationId})
     });
     const data = await res.json();
     waiting.remove();
@@ -162,7 +163,7 @@ async function loadProjects(){
       const d=document.createElement("p");d.textContent=p.description||"Без описания";
       const meta=document.createElement("small");meta.textContent="Обновлён: "+new Date(p.updated_at).toLocaleString("ru-RU");
       const actions=document.createElement("div");actions.className="project-actions";
-      const open=document.createElement("button");open.className="primary-action";open.textContent="Открыть в чате";open.onclick=()=>{conversationId=null;transcript=[];messages.innerHTML="";showView("chat");promptBox.value="Работаем над проектом «"+p.name+"». Описание: "+p.description+". Инструкции проекта: "+p.instructions+". Учитывай этот контекст во всех ответах.";send();};
+      const open=document.createElement("button");open.className="primary-action";open.textContent="Открыть в чате";open.onclick=()=>{activeProjectId=p.id;conversationId=null;transcript=[];messages.innerHTML="";showView("chat");promptBox.value="Открой рабочий контекст проекта и кратко подтверди, что понял его цели, структуру и инструкции. Предложи следующий практический шаг.";send();};
       const edit=document.createElement("button");edit.className="secondary-action";edit.textContent="Изменить";edit.onclick=()=>editProject(p);
       const del=document.createElement("button");del.className="secondary-action danger";del.textContent="Удалить";del.onclick=async()=>{if(!confirm("Удалить проект «"+p.name+"»?"))return;await devRequest("/api/projects/"+encodeURIComponent(p.id),{method:"DELETE"});loadProjects();};
       actions.append(open,edit,del);card.append(h,d,meta,actions);list.append(card);
