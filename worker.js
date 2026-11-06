@@ -29,6 +29,16 @@ async function ensureDatabase(env) {
     "CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at)"
   ).run();
   await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      instructions TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `).run();
+  await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS agent_requests (
       id TEXT PRIMARY KEY,
       ip_hash TEXT NOT NULL,
@@ -51,7 +61,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (env.DB && url.pathname !== "/health") {
+    if (env.DB && url.pathname !== "/health" && url.pathname !== "/api/ci/status") {
       try {
         await ensureDatabase(env);
       } catch (e) {
@@ -96,6 +106,65 @@ export default {
           sha: run.head_sha, title: run.display_title, url: run.html_url, updatedAt: run.updated_at
         }, jobs });
       } catch (e) { return json({ error: "CI status error: " + e.message }, 502); }
+    }
+
+
+    // Persistent project workspace.
+    if (url.pathname === "/api/projects" && request.method === "GET") {
+      if (!env.DB) return json({ error: "D1 недоступна." }, 503);
+      const rows = await env.DB.prepare("SELECT id,name,description,instructions,created_at,updated_at FROM projects ORDER BY updated_at DESC LIMIT 100").all();
+      return json({ projects: rows.results || [] });
+    }
+    if (url.pathname === "/api/projects" && request.method === "POST") {
+      if (!env.DB) return json({ error: "D1 недоступна." }, 503);
+      const body = await request.json().catch(() => ({}));
+      const name = String(body.name || "").trim().slice(0,100);
+      if (!name) return json({ error: "Укажи название проекта." }, 400);
+      const projectId = id(), now = new Date().toISOString();
+      await env.DB.prepare("INSERT INTO projects (id,name,description,instructions,created_at,updated_at) VALUES (?,?,?,?,?,?)")
+        .bind(projectId,name,String(body.description||"").slice(0,1000),String(body.instructions||"").slice(0,8000),now,now).run();
+      return json({ project: { id:projectId,name,description:String(body.description||""),instructions:String(body.instructions||""),created_at:now,updated_at:now } }, 201);
+    }
+    if (url.pathname.startsWith("/api/projects/") && request.method === "PUT") {
+      if (!env.DB) return json({ error: "D1 недоступна." }, 503);
+      const projectId = decodeURIComponent(url.pathname.slice("/api/projects/".length));
+      const body = await request.json().catch(() => ({}));
+      const name = String(body.name || "").trim().slice(0,100);
+      if (!name) return json({ error: "Название проекта обязательно." }, 400);
+      const now = new Date().toISOString();
+      const result = await env.DB.prepare("UPDATE projects SET name=?,description=?,instructions=?,updated_at=? WHERE id=?")
+        .bind(name,String(body.description||"").slice(0,1000),String(body.instructions||"").slice(0,8000),now,projectId).run();
+      if (!result.meta?.changes) return json({ error: "Проект не найден." }, 404);
+      return json({ ok:true });
+    }
+    if (url.pathname.startsWith("/api/projects/") && request.method === "DELETE") {
+      if (!env.DB) return json({ error: "D1 недоступна." }, 503);
+      const projectId = decodeURIComponent(url.pathname.slice("/api/projects/".length));
+      await env.DB.prepare("DELETE FROM projects WHERE id=?").bind(projectId).run();
+      return json({ ok:true });
+    }
+
+    // Generate a self-contained HTML artifact with the configured model.
+    if (url.pathname === "/api/artifact" && request.method === "POST") {
+      if (!env.OPENROUTER_API_KEY && !env.GEMINI_API_KEY) return json({ error:"AI-провайдер не подключён." },503);
+      const body = await request.json().catch(() => ({}));
+      const prompt = String(body.prompt || "").trim().slice(0,6000);
+      if (!prompt) return json({ error:"Опиши, что нужно создать." },400);
+      const system = "Ты создаёшь готовые интерактивные веб-артефакты для SLAV AI. Верни ТОЛЬКО полный самодостаточный HTML-документ с CSS и JavaScript внутри. Без Markdown-ограждений, пояснений и внешних зависимостей. Интерфейс адаптивный, аккуратный, доступный. Не используй сетевые запросы, кроме явно необходимых пользователю.";
+      let html = "", error = "";
+      if (env.OPENROUTER_API_KEY) {
+        const r = await fetch("https://openrouter.ai/api/v1/chat/completions",{method:"POST",headers:{"authorization":"Bearer "+env.OPENROUTER_API_KEY,"content-type":"application/json","HTTP-Referer":"https://slav-ai-cloud.slafrika1996.workers.dev","X-Title":"SLAV AI Artifacts"},body:JSON.stringify({model:env.OPENROUTER_MODEL||"nvidia/nemotron-3-ultra-550b-a55b:free",messages:[{role:"system",content:system},{role:"user",content:prompt}],max_tokens:7000})});
+        const d=await r.json().catch(()=>({}));
+        if(r.ok) html=String(d.choices?.[0]?.message?.content||"").trim(); else error=d.error?.message||("OpenRouter HTTP "+r.status);
+      }
+      if (!html && env.GEMINI_API_KEY) {
+        const r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key="+encodeURIComponent(env.GEMINI_API_KEY),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({systemInstruction:{parts:[{text:system}]},contents:[{role:"user",parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:7000}})});
+        const d=await r.json().catch(()=>({}));
+        if(r.ok) html=(d.candidates?.[0]?.content?.parts||[]).map(x=>x.text||"").join("").trim(); else error=d.error?.message||("Gemini HTTP "+r.status);
+      }
+      html=html.replace(/^```(?:html)?\s*/i,"").replace(/\s*```$/,"").trim();
+      if (!html || !/<html[\s>]/i.test(html)) return json({error:error||"Модель не вернула корректный HTML-артефакт."},502);
+      return json({html,model:env.OPENROUTER_MODEL||"gemini-3.8-flash"});
     }
 
     // Autonomous coding agent: inspect repository, read files, and stage edits.
