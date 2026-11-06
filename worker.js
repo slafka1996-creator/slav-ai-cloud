@@ -587,13 +587,33 @@ export default {
     }
 
     if (url.pathname === "/api/conversation" && request.method === "GET") {
-      if (!env.DB) return json([]);
+      if (!env.DB) return json({ error: "D1 недоступна." }, 503);
       const conversationId = url.searchParams.get("id");
       if (!conversationId) return json({ error: "Не указан id." }, 400);
       const rows = await env.DB.prepare(
-        "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
+        "SELECT role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC"
       ).bind(conversationId).all();
       return json(rows.results || []);
+    }
+
+    if (url.pathname.startsWith("/api/conversation/") && request.method === "PATCH") {
+      if (!env.DB) return json({ error: "D1 недоступна." }, 503);
+      const conversationId = decodeURIComponent(url.pathname.slice("/api/conversation/".length));
+      const body = await request.json().catch(() => ({}));
+      const title = String(body.title || "").trim().slice(0, 80);
+      if (!title) return json({ error: "Название не может быть пустым." }, 400);
+      const result = await env.DB.prepare("UPDATE conversations SET title=?,updated_at=? WHERE id=?")
+        .bind(title,new Date().toISOString(),conversationId).run();
+      if (!result.meta?.changes) return json({ error: "Чат не найден." }, 404);
+      return json({ ok:true, title });
+    }
+
+    if (url.pathname.startsWith("/api/conversation/") && request.method === "DELETE") {
+      if (!env.DB) return json({ error: "D1 недоступна." }, 503);
+      const conversationId = decodeURIComponent(url.pathname.slice("/api/conversation/".length));
+      await env.DB.prepare("DELETE FROM messages WHERE conversation_id=?").bind(conversationId).run();
+      await env.DB.prepare("DELETE FROM conversations WHERE id=?").bind(conversationId).run();
+      return json({ ok:true });
     }
 
     return env.ASSETS.fetch(request);
