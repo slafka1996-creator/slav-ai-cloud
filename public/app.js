@@ -6,6 +6,7 @@ let conversationId = null;
 let transcript = [];
 let attachedFiles = [];
 let activeProjectId = null;
+let activeChatController = null;
 const titles = {chat:"Обычный чат",think:"Глубокий анализ",code:"Программирование",research:"Исследование"};
 
 function escapeHtml(value) {
@@ -67,7 +68,11 @@ async function send() {
   attachedFiles = [];
   renderAttachments();
   const button = $("#sendBtn");
+  const stopButton = $("#stopBtn");
+  const controller = new AbortController();
+  activeChatController = controller;
   button.disabled = true;
+  stopButton.hidden = false;
   const bubble = document.createElement("div");
   bubble.className = "message assistant";
   const avatar = document.createElement("div"); avatar.className = "avatar"; avatar.textContent = "S";
@@ -76,7 +81,7 @@ async function send() {
   let answer = "";
   try {
     const res = await fetch("/api/chat", {
-      method:"POST", headers:{"content-type":"application/json"},
+      method:"POST", headers:{"content-type":"application/json"}, signal:controller.signal,
       body:JSON.stringify({message: message || "Проанализируй прикреплённые файлы.", attachmentContext: filesForRequest.map(f=>"ФАЙЛ: "+f.name+"\n"+f.content).join("\n\n"), projectId:activeProjectId, mode,conversationId})
     });
     if (!res.ok) { const data=await res.json().catch(()=>({})); throw new Error(data.error || "Ошибка сервера"); }
@@ -98,11 +103,15 @@ async function send() {
     transcript.push({role:"assistant",text:answer});
     refreshChatHistory();
   } catch(e) {
-    if(answer){content.innerHTML=renderMarkdown(answer+"\n\n⚠️ "+e.message);transcript.push({role:"assistant",text:answer});}
+    if(e.name==="AbortError") {
+      if(answer){content.innerHTML=renderMarkdown(answer+"\n\n*Генерация остановлена.*");transcript.push({role:"assistant",text:answer});}
+      else {bubble.remove();addMessage("assistant","Генерация остановлена.");}
+    } else if(answer){content.innerHTML=renderMarkdown(answer+"\n\n⚠️ "+e.message);transcript.push({role:"assistant",text:answer});}
     else {bubble.remove();addMessage("assistant",e.message,true);}
-  } finally {button.disabled=false;promptBox.focus();}
+  } finally {if(activeChatController===controller)activeChatController=null;button.disabled=false;stopButton.hidden=true;promptBox.focus();}
 }
 $("#sendBtn").addEventListener("click",send);
+$("#stopBtn").addEventListener("click",()=>activeChatController?.abort());
 const fileInput=$("#fileInput");
 function renderAttachments(){const box=$("#attachmentList");if(!box)return;box.hidden=!attachedFiles.length;box.replaceChildren();attachedFiles.forEach((f,i)=>{const chip=document.createElement("span");chip.className="attachment-chip";chip.textContent="📎 "+f.name+" ";const remove=document.createElement("button");remove.type="button";remove.textContent="×";remove.setAttribute("aria-label","Убрать "+f.name);remove.onclick=()=>{attachedFiles.splice(i,1);renderAttachments();};chip.append(remove);box.append(chip);});}
 $("#attachBtn")?.addEventListener("click",()=>fileInput.click());
