@@ -62,3 +62,68 @@ messages.addEventListener("click",e=>{const btn=e.target.closest("[data-prompt]"
 $("#menuBtn").addEventListener("click",()=>$(".sidebar").classList.toggle("open"));
 $("#exportBtn").addEventListener("click",()=>{const text=transcript.map(x=>(x.role==="user"?"Вы":"SLAV AI")+":\n"+x.text).join("\n\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type:"text/plain"}));a.download="slav-ai-chat.txt";a.click();URL.revokeObjectURL(a.href);});
 fetch("/health").then(r=>r.json()).then(d=>{const dot=$("#statusDot");dot.classList.toggle("ok",d.openrouterConfigured || d.geminiConfigured);$("#statusText").textContent=(d.openrouterConfigured || d.geminiConfigured)?"AI подключён · GitHub "+(d.githubConfigured?"подключён":"не подключён"):"Нужен API-ключ";}).catch(()=>{$("#statusText").textContent="Нет связи с сервером";});
+
+// Protected GitHub developer workspace. Admin key stays only in page memory.
+let devAdminKey = "";
+const devPanel = $("#devPanel");
+const devStatus = $("#devStatus");
+const devHeaders = () => ({ "content-type":"application/json", "x-slav-admin-key":devAdminKey });
+const devSay = text => { devStatus.textContent = text; };
+async function devRequest(url, options={}) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(()=>({}));
+  if (!response.ok) throw new Error(data.error || ("HTTP "+response.status));
+  return data;
+}
+$("#devBtn").addEventListener("click",()=>{devPanel.hidden=false;});
+$("#devClose").addEventListener("click",()=>{devPanel.hidden=true;devAdminKey="";$("#devKey").value="";devSay("Ключ очищен из памяти страницы.");});
+$("#devKey").addEventListener("input",e=>{devAdminKey=e.target.value.trim();});
+$("#repoRefresh").addEventListener("click",async()=>{
+  try{
+    const data=await devRequest("/api/github/tree");
+    const list=$("#repoTree");list.replaceChildren();
+    for(const item of data.items||[]){
+      const line=document.createElement("div");
+      line.textContent=(item.type==="dir"?"📁 ":"📄 ")+item.path;
+      if(item.type==="file"){line.tabIndex=0;line.style.cursor="pointer";line.addEventListener("click",()=>{$("#devPath").value=item.path;});}
+      list.append(line);
+    }
+    devSay("Получено элементов: "+(data.items||[]).length);
+  }catch(e){devSay(e.message);}
+});
+$("#fileLoad").addEventListener("click",async()=>{
+  const path=$("#devPath").value.trim();if(!path){devSay("Укажи путь к файлу.");return;}
+  try{const data=await devRequest("/api/github/file?path="+encodeURIComponent(path));$("#devContent").value=data.content;devSay("Файл загружен: "+data.path+" · SHA "+data.sha);}
+  catch(e){devSay(e.message);}
+});
+$("#fileStage").addEventListener("click",async()=>{
+  if(!devAdminKey){devSay("Сначала введи ключ администратора.");return;}
+  const path=$("#devPath").value.trim(),content=$("#devContent").value;
+  if(!path){devSay("Укажи путь к файлу.");return;}
+  try{
+    const staged=await devRequest("/api/github/write/stage",{method:"POST",headers:devHeaders(),body:JSON.stringify({path,content})});
+    devSay("Изменение подготовлено: "+staged.path+" · "+staged.characters+" символов. Оно ещё НЕ опубликовано.");
+    $("#stagedRefresh").click();
+  }catch(e){devSay(e.message);}
+});
+$("#stagedRefresh").addEventListener("click",async()=>{
+  if(!devAdminKey){devSay("Сначала введи ключ администратора.");return;}
+  try{
+    const data=await devRequest("/api/github/write/staged",{headers:{"x-slav-admin-key":devAdminKey}});
+    const list=$("#stagedList");list.replaceChildren();
+    const rows=data.staged||[];
+    for(const item of rows){const line=document.createElement("div");line.textContent="📝 "+item.path+" · "+item.characters+" символов";list.append(line);}
+    devSay(rows.length?"Подготовлено файлов: "+rows.length:"Очередь изменений пуста.");
+  }catch(e){devSay(e.message);}
+});
+$("#devCommit").addEventListener("click",async()=>{
+  if(!devAdminKey){devSay("Сначала введи ключ администратора.");return;}
+  if(!confirm("ВНИМАНИЕ: отправить все подготовленные изменения прямо в main?"))return;
+  const message=prompt("Название коммита:","Update files via SLAV AI");
+  if(message===null)return;
+  try{
+    const data=await devRequest("/api/github/write/commit",{method:"POST",headers:devHeaders(),body:JSON.stringify({confirm:true,message})});
+    devSay("Коммит создан: "+data.commit+"\nФайлы: "+(data.files||[]).join(", "));
+    $("#stagedRefresh").click();
+  }catch(e){devSay(e.message);}
+});
