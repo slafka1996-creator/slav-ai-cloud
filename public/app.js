@@ -45,6 +45,7 @@ async function send() {
     if (!res.ok) throw new Error(data.error || "Ошибка сервера");
     conversationId = data.conversationId || conversationId;
     addMessage("assistant",data.answer || "Пустой ответ");
+    refreshChatHistory();
   } catch(e) {
     waiting.remove();
     addMessage("assistant",e.message,true);
@@ -56,7 +57,10 @@ async function send() {
 $("#sendBtn").addEventListener("click",send);
 promptBox.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}});
 promptBox.addEventListener("input",()=>{promptBox.style.height="auto";promptBox.style.height=Math.min(promptBox.scrollHeight,180)+"px";});
-$("#newChat").addEventListener("click",()=>{conversationId=null;transcript=[];messages.innerHTML='<div class="welcome" id="welcome"><div class="welcome-logo">S</div><h1>Привет! Я SLAV AI.</h1><p>Чем займёмся сегодня?</p><div class="suggestions"><button data-prompt="Помоги мне составить план проекта">Составить план проекта</button><button data-prompt="Напиши и объясни код для моей задачи">Помочь с программированием</button><button data-prompt="Объясни сложную тему простыми словами">Объяснить сложную тему</button></div></div>';});
+async function startNewChat(){conversationId=null;transcript=[];messages.innerHTML='<div class="welcome" id="welcome"><div class="welcome-logo">S</div><h1>Привет! Я SLAV AI.</h1><p>Чем займёмся сегодня?</p><div class="suggestions"><button data-prompt="Помоги мне составить план проекта">Составить план проекта</button><button data-prompt="Напиши и объясни код для моей задачи">Помочь с программированием</button><button data-prompt="Объясни сложную тему простыми словами">Объяснить сложную тему</button></div></div>';  document.querySelectorAll('.workspace-tab').forEach(b=>b.classList.toggle('active',b.dataset.view==='chat'));
+  showView('chat');promptBox.focus();
+}
+$('#newChat').addEventListener('click',startNewChat);
 document.querySelectorAll(".mode").forEach(btn=>btn.addEventListener("click",()=>{mode=btn.dataset.mode;document.querySelectorAll(".mode").forEach(x=>x.classList.toggle("active",x===btn));$("#modeTitle").textContent=titles[mode];$("#menuBtn").closest("header");$(".sidebar").classList.remove("open");}));
 messages.addEventListener("click",e=>{const btn=e.target.closest("[data-prompt]");if(btn){promptBox.value=btn.dataset.prompt;send();}});
 $("#menuBtn").addEventListener("click",()=>$(".sidebar").classList.toggle("open"));
@@ -179,3 +183,38 @@ $("#generateArtifact").addEventListener("click",async()=>{
   catch(e){$("#artifactStatus").textContent="Не удалось создать: "+e.message;}finally{btn.disabled=false;}
 });
 $("#downloadArtifact").addEventListener("click",()=>{if(!currentArtifact)return;const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([currentArtifact],{type:"text/html"}));a.download="slav-ai-artifact.html";a.click();URL.revokeObjectURL(a.href);});
+
+
+// Chat history: load, search, rename and delete saved conversations.
+async function refreshChatHistory(){
+  const list=$("#chatHistory");if(!list)return;
+  try{
+    const rows=await devRequest("/api/conversations");
+    const query=($("#chatSearch")?.value||"").trim().toLocaleLowerCase("ru");
+    const filtered=rows.filter(x=>String(x.title||"Новый чат").toLocaleLowerCase("ru").includes(query));
+    list.replaceChildren();
+    if(!filtered.length){const empty=document.createElement("div");empty.className="history-empty";empty.textContent=query?"Ничего не найдено":"Здесь появятся сохранённые чаты";list.append(empty);return;}
+    filtered.forEach(item=>{
+      const row=document.createElement("div");row.className="history-row"+(item.id===conversationId?" active":"");
+      const open=document.createElement("button");open.className="history-open";open.textContent=item.title||"Новый чат";open.title=item.title||"Новый чат";open.onclick=()=>loadConversation(item.id);
+      const menu=document.createElement("button");menu.className="history-menu";menu.textContent="···";menu.setAttribute("aria-label","Действия с чатом");
+      const actions=document.createElement("div");actions.className="history-actions";
+      const rename=document.createElement("button");rename.textContent="Переименовать";rename.onclick=async()=>{const title=prompt("Новое название чата",item.title||"Новый чат");if(!title?.trim())return;try{await devRequest("/api/conversation/"+encodeURIComponent(item.id),{method:"PATCH",headers:{"content-type":"application/json"},body:JSON.stringify({title:title.trim()})});refreshChatHistory();}catch(e){alert(e.message);}};
+      const remove=document.createElement("button");remove.textContent="Удалить";remove.className="danger";remove.onclick=async()=>{if(!confirm("Удалить чат «"+(item.title||"Новый чат")+"»?"))return;try{await devRequest("/api/conversation/"+encodeURIComponent(item.id),{method:"DELETE"});if(conversationId===item.id)startNewChat();refreshChatHistory();}catch(e){alert(e.message);}};
+      actions.append(rename,remove);menu.onclick=()=>{document.querySelectorAll(".history-actions.open").forEach(x=>{if(x!==actions)x.classList.remove("open")});actions.classList.toggle("open")};
+      row.append(open,menu,actions);list.append(row);
+    });
+  }catch(e){list.textContent="История недоступна: "+e.message;}
+}
+async function loadConversation(id){
+  try{
+    const rows=await devRequest("/api/conversation?id="+encodeURIComponent(id));
+    conversationId=id;transcript=[];messages.replaceChildren();
+    rows.forEach(row=>addMessage(row.role,row.content));
+    if(!rows.length)messages.innerHTML='<div class="welcome" id="welcome"><div class="welcome-logo">S</div><h1>Пустой чат</h1><p>Напиши первое сообщение.</p></div>';
+    showView("chat");refreshChatHistory();promptBox.focus();
+  }catch(e){alert("Не удалось открыть чат: "+e.message);}
+}
+$("#refreshChats")?.addEventListener("click",refreshChatHistory);
+$("#chatSearch")?.addEventListener("input",refreshChatHistory);
+refreshChatHistory();
