@@ -13,7 +13,7 @@ export default {
       return json({
         ok: true,
         app: "SLAV AI",
-        model: env.GEMINI_MODEL || "gemini-2.5-flash",
+        model: env.GEMINI_MODEL || "gemini-3.8-flash",
         geminiConfigured: Boolean(env.GEMINI_API_KEY),
         databaseConfigured: Boolean(env.DB)
       });
@@ -59,7 +59,7 @@ export default {
       }
 
       const contents = [...history, { role: "user", parts: [{ text: message }] }];
-      const model = env.GEMINI_MODEL || "gemini-2.5-flash";
+      const model = env.GEMINI_MODEL || "gemini-3.8-flash";
 
       let upstream;
       try {
@@ -73,7 +73,7 @@ export default {
             body: JSON.stringify({
               systemInstruction: { parts: [{ text: system }] },
               contents,
-              generationConfig: { temperature: 0.7, maxOutputTokens: 4096 }
+              generationConfig: { maxOutputTokens: 4096 }
             })
           }
         );
