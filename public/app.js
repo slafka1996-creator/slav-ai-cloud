@@ -139,7 +139,10 @@ $("#agentRun").addEventListener("click",async()=>{
     $("#devAgentState").textContent=(data.staged||[]).length?"Подготовил изменения":"Закончил анализ";
     $("#designAgentState").textContent="Модуль в разработке";
     $("#testAgentState").textContent="Модуль в разработке";
-    $("#agentResult").textContent=(data.answer||"Готово.")+"\n\nПодготовленные файлы:\n"+((data.staged||[]).map(x=>x.path+" ("+x.characters+" символов)").join("\n")||"Нет");
+    const team=data.team||{};
+    $("#designAgentState").textContent=team.designer?"Проверил UI":"Нет изменений для проверки";
+    $("#testAgentState").textContent=team.tester?"Провёл статический QA":"Нет изменений для проверки";
+    $("#agentResult").textContent=(data.answer||"Готово.")+"\\n\\n🎨 UI DESIGNER\\n"+(team.designer||"Проверка не запускалась.")+"\\n\\n🧪 BROWSER TESTER / QA\\n"+(team.tester||"Проверка не запускалась.")+"\\n\\n📁 Подготовленные файлы:\\n"+((data.staged||[]).map(x=>x.path+" ("+x.characters+" символов)").join("\\n")||"Нет");
   }catch(e){$("#agentResult").textContent="Ошибка агента: "+e.message;}
   finally{btn.disabled=false;floor.classList.remove("busy");}
 });
