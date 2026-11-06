@@ -68,30 +68,39 @@ async function send() {
   renderAttachments();
   const button = $("#sendBtn");
   button.disabled = true;
-  const waiting = document.createElement("div");
-  waiting.className = "message";
-  waiting.innerHTML = '<div class="avatar">S</div><div class="content">Думаю…</div>';
-  messages.append(waiting);
-  messages.scrollTop = messages.scrollHeight;
+  const bubble = document.createElement("div");
+  bubble.className = "message assistant";
+  const avatar = document.createElement("div"); avatar.className = "avatar"; avatar.textContent = "S";
+  const content = document.createElement("div"); content.className = "content markdown-content"; content.textContent = "Думаю…";
+  bubble.append(avatar,content); messages.append(bubble); messages.scrollTop = messages.scrollHeight;
+  let answer = "";
   try {
     const res = await fetch("/api/chat", {
-      method:"POST",
-      headers:{"content-type":"application/json"},
+      method:"POST", headers:{"content-type":"application/json"},
       body:JSON.stringify({message: message || "Проанализируй прикреплённые файлы.", attachmentContext: filesForRequest.map(f=>"ФАЙЛ: "+f.name+"\n"+f.content).join("\n\n"), projectId:activeProjectId, mode,conversationId})
     });
-    const data = await res.json();
-    waiting.remove();
-    if (!res.ok) throw new Error(data.error || "Ошибка сервера");
-    conversationId = data.conversationId || conversationId;
-    addMessage("assistant",data.answer || "Пустой ответ");
+    if (!res.ok) { const data=await res.json().catch(()=>({})); throw new Error(data.error || "Ошибка сервера"); }
+    if (!res.body) throw new Error("Браузер не поддерживает потоковый ответ.");
+    const reader=res.body.getReader(), decoder=new TextDecoder(); let buffer="", finished=false;
+    const processEvent=(raw)=>{
+      let event="message",payload="";
+      for(const line of raw.split("\n")){if(line.startsWith("event:"))event=line.slice(6).trim();else if(line.startsWith("data:"))payload+=line.slice(5).trim();}
+      if(!payload)return;
+      const data=JSON.parse(payload);
+      if(event==="delta"){answer+=data.text||"";content.innerHTML=renderMarkdown(answer);messages.scrollTop=messages.scrollHeight;}
+      else if(event==="done"){conversationId=data.conversationId||conversationId;finished=true;}
+      else if(event==="error")throw new Error(data.error||"Ошибка генерации.");
+    };
+    while(true){const {value,done}=await reader.read();if(done)break;buffer+=decoder.decode(value,{stream:true});const chunks=buffer.split("\n\n");buffer=chunks.pop()||"";for(const chunk of chunks)processEvent(chunk);}
+    if(buffer.trim())processEvent(buffer);
+    if(!finished)throw new Error(answer?"Поток завершился до подтверждения сохранения ответа.":"Модель не вернула ответ.");
+    if(!answer.trim())content.textContent="Пустой ответ";
+    transcript.push({role:"assistant",text:answer});
     refreshChatHistory();
   } catch(e) {
-    waiting.remove();
-    addMessage("assistant",e.message,true);
-  } finally {
-    button.disabled = false;
-    promptBox.focus();
-  }
+    if(answer){content.innerHTML=renderMarkdown(answer+"\n\n⚠️ "+e.message);transcript.push({role:"assistant",text:answer});}
+    else {bubble.remove();addMessage("assistant",e.message,true);}
+  } finally {button.disabled=false;promptBox.focus();}
 }
 $("#sendBtn").addEventListener("click",send);
 const fileInput=$("#fileInput");
