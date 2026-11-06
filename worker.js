@@ -51,8 +51,55 @@ export default {
         openrouterConfigured: Boolean(env.OPENROUTER_API_KEY),
         geminiConfigured: Boolean(env.GEMINI_API_KEY),
         geminiFallbackModel: "gemini-3.8-flash",
-        databaseConfigured: Boolean(env.DB)
+        databaseConfigured: Boolean(env.DB),
+        githubConfigured: Boolean(env.GITHUB_TOKEN),
+        githubRepository: env.GITHUB_REPO || "slafka1996-creator/steadycity-releases"
       });
+    }
+
+    // Read-only GitHub bridge for the coding agent.
+    if (url.pathname.startsWith("/api/github/")) {
+      if (!env.GITHUB_TOKEN) {
+        return json({ error: "GitHub ещё не подключён. Добавь секрет GITHUB_TOKEN в Cloudflare." }, 503);
+      }
+      const repo = env.GITHUB_REPO || "slafka1996-creator/steadycity-releases";
+      const headers = {
+        "authorization": "Bearer " + env.GITHUB_TOKEN,
+        "accept": "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28"
+      };
+      try {
+        if (url.pathname === "/api/github/status") {
+          const response = await fetch("https://api.github.com/repos/" + repo, { headers });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) return json({ connected: false, error: data.message || "GitHub API error" }, response.status);
+          return json({ connected: true, repository: data.full_name, defaultBranch: data.default_branch, private: data.private });
+        }
+        if (url.pathname === "/api/github/tree") {
+          const branch = url.searchParams.get("ref") || "main";
+          const path = url.searchParams.get("path") || "";
+          const response = await fetch("https://api.github.com/repos/" + repo + "/contents/" + path.split("/").map(encodeURIComponent).join("/") + "?ref=" + encodeURIComponent(branch), { headers });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) return json({ error: data.message || "Не удалось получить список файлов" }, response.status);
+          const items = Array.isArray(data) ? data.map(item => ({ name: item.name, path: item.path, type: item.type, size: item.size })) : [{ name: data.name, path: data.path, type: data.type, size: data.size }];
+          return json({ repository: repo, branch, path, items });
+        }
+        if (url.pathname === "/api/github/file") {
+          const path = url.searchParams.get("path");
+          const branch = url.searchParams.get("ref") || "main";
+          if (!path) return json({ error: "Укажи path файла." }, 400);
+          const response = await fetch("https://api.github.com/repos/" + repo + "/contents/" + path.split("/").map(encodeURIComponent).join("/") + "?ref=" + encodeURIComponent(branch), { headers });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) return json({ error: data.message || "Не удалось прочитать файл" }, response.status);
+          if (data.type !== "file" || !data.content) return json({ error: "Это не текстовый файл или GitHub не вернул его содержимое." }, 400);
+          const binary = Uint8Array.from(atob(data.content.replace(/\\s/g, "")), c => c.charCodeAt(0));
+          const decoded = new TextDecoder().decode(binary);
+          return json({ repository: repo, branch, path: data.path, sha: data.sha, content: decoded });
+        }
+        return json({ error: "Неизвестный GitHub endpoint." }, 404);
+      } catch (e) {
+        return json({ error: "GitHub connection error: " + e.message }, 502);
+      }
     }
 
     if (url.pathname === "/api/chat" && request.method === "POST") {
