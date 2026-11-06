@@ -461,10 +461,15 @@ export default {
         code: "Ты опытный программист. Предлагай рабочий код, объясняй куда его вставить и предупреждай о рисках. Не утверждай, что запускал или проверял код, если этого не делал.",
         research: "Проводя анализ, отделяй подтверждённые факты от предположений. Не выдумывай источники и ссылки."
       };
+      let projectContext = "";
+      if (body.projectId && env.DB) {
+        const project = await env.DB.prepare("SELECT name,description,instructions FROM projects WHERE id=?").bind(String(body.projectId)).first();
+        if (project) projectContext = "\\n\\nКонтекст активного проекта: " + project.name + "\\nОписание: " + project.description + "\\nИнструкции: " + project.instructions + "\\nУчитывай эти сведения в текущем запросе и последующих сообщениях этого чата.";
+      }
       const system = "Ты SLAV AI — русскоязычный универсальный AI-помощник. " +
         (modePrompts[body.mode] || modePrompts.chat) +
         " Отвечай на русском, если пользователь не попросил другой язык. " +
-        "Не заявляй о доступе к браузеру, GitHub, файлам или компьютеру, если такого инструмента нет.";
+        "Не заявляй о доступе к браузеру, GitHub, файлам или компьютеру, если такого инструмента нет." + projectContext;
 
       let history = [];
       if (env.DB) {
