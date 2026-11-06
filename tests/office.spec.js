@@ -55,3 +55,10 @@ test("chat history controls are available", async ({ page }) => {
   await expect(page.locator("#chatSearch")).toBeVisible();
   await expect(page.locator("#refreshChats")).toBeVisible();
 });
+
+test("chat supports attaching text and source files", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#attachBtn")).toBeVisible();
+  await expect(page.locator("#fileInput")).toHaveAttribute("multiple", "");
+  await expect(page.locator("#attachmentList")).toBeAttached();
+});
