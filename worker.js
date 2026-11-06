@@ -67,6 +67,80 @@ export default {
       });
     }
 
+
+    // Autonomous coding agent: inspect repository, read files, and stage edits.
+    if (url.pathname === "/api/agent" && request.method === "POST") {
+      if (!env.OPENROUTER_API_KEY) return json({error:"OpenRouter API key is not configured."},503);
+      if (!env.GITHUB_TOKEN) return json({error:"GitHub is not connected."},503);
+      if (!env.SLAV_ADMIN_KEY) return json({error:"Admin protection is not configured."},503);
+      const adminKey=request.headers.get("x-slav-admin-key")||"";
+      if(adminKey.length!==env.SLAV_ADMIN_KEY.length || adminKey!==env.SLAV_ADMIN_KEY) return json({error:"Нет доступа."},401);
+      if(!env.DB) return json({error:"D1 is required."},503);
+      const input=await request.json().catch(()=>null);
+      const task=String(input?.task||"").trim().slice(0,8000);
+      if(!task) return json({error:"Опиши задачу."},400);
+      const repo=env.GITHUB_REPO||"slafka1996-creator/steadycity-releases";
+      const ghHeaders={"authorization":"Bearer "+env.GITHUB_TOKEN,"user-agent":"SLAV-AI-Cloud/1.0","accept":"application/vnd.github+json","x-github-api-version":"2022-11-28"};
+      const gh=async(path)=>{
+        const r=await fetch("https://api.github.com/repos/"+repo+path,{headers:ghHeaders});
+        const d=await r.json().catch(()=>({}));
+        if(!r.ok) throw new Error("GitHub "+r.status+": "+(d.message||"API error"));
+        return d;
+      };
+      const tools=[
+        {type:"function",function:{name:"list_files",description:"List files and folders in a repository directory. Use path empty for root.",parameters:{type:"object",properties:{path:{type:"string",description:"Directory path, empty for root"}} ,required:["path"],additionalProperties:false}}},
+        {type:"function",function:{name:"read_file",description:"Read a text file from the repository main branch.",parameters:{type:"object",properties:{path:{type:"string"}},required:["path"],additionalProperties:false}}},
+        {type:"function",function:{name:"stage_file",description:"Stage a complete replacement for an existing text file. Does not publish or commit it. Only allowed project folders.",parameters:{type:"object",properties:{path:{type:"string"},content:{type:"string"}},required:["path","content"],additionalProperties:false}}}
+      ];
+      const messages=[
+        {role:"system",content:"Ты SLAV AI Developer Agent, работаешь с репозиторием "+repo+". Самостоятельно исследуй задачу: сначала изучи AGENTS.md и README.md, затем найди релевантные файлы, прочитай их и внеси необходимые исправления. Пользуйся инструментами, не выдумывай содержимое файлов. Для stage_file передавай ПОЛНОЕ итоговое содержимое файла. Разрешённые пути только внутри gorodok/, src/, tools/, microcity-deploy/. Не меняй pkg/, .github/workflows/, секреты и конфигурацию деплоя. Не публикуй коммиты. В конце перечисли изученные файлы, подготовленные изменения и то, что ещё не удалось проверить. Если задача неоднозначна — задай уточняющий вопрос, не меняй файлы."},
+        {role:"user",content:task}
+      ];
+      const model=env.OPENROUTER_MODEL||"nvidia/nemotron-3-ultra-550b-a55b:free";
+      const staged=[];
+      try{
+        for(let turn=0;turn<8;turn++){
+          const response=await fetch("https://openrouter.ai/api/v1/chat/completions",{
+            method:"POST",headers:{"authorization":"Bearer "+env.OPENROUTER_API_KEY,"content-type":"application/json","HTTP-Referer":"https://slav-ai-cloud.slafka1996.workers.dev","X-Title":"SLAV AI Studio"},
+            body:JSON.stringify({model,messages,tools,tool_choice:"auto",max_tokens:5000})
+          });
+          const data=await response.json().catch(()=>({}));
+          if(!response.ok) throw new Error(data.error?.message||("OpenRouter HTTP "+response.status));
+          const msg=data.choices?.[0]?.message;
+          if(!msg) throw new Error("Модель не вернула ответ.");
+          messages.push(msg);
+          const calls=msg.tool_calls||[];
+          if(!calls.length) return json({ok:true,answer:msg.content||"Агент завершил работу без текстового отчёта.",staged,model});
+          for(const call of calls){
+            let args={};try{args=JSON.parse(call.function.arguments||"{}");}catch{}
+            let result;
+            const path=String(args.path||"").replace(/^\/+/, "");
+            if(call.function.name==="list_files"){
+              if(path.split("/").some(x=>x===".."||x===".")) throw new Error("Недопустимый путь.");
+              const d=await gh("/contents/"+path.split("/").filter(Boolean).map(encodeURIComponent).join("/")+"?ref=main");
+              result=(Array.isArray(d)?d:[d]).map(x=>({name:x.name,path:x.path,type:x.type,size:x.size}));
+            } else if(call.function.name==="read_file"){
+              if(!path||path.split("/").some(x=>x===".."||x===".")) throw new Error("Недопустимый путь.");
+              const d=await gh("/contents/"+path.split("/").map(encodeURIComponent).join("/")+"?ref=main");
+              if(d.type!=="file"||!d.content) throw new Error("Это не текстовый файл.");
+              result={path:d.path,sha:d.sha,content:new TextDecoder().decode(Uint8Array.from(atob(d.content.replace(/\s/g,"")),c=>c.charCodeAt(0)))};
+            } else if(call.function.name==="stage_file"){
+              const allowed=/^(gorodok|src|tools|microcity-deploy)\//.test(path);
+              if(!allowed||path.split("/").some(x=>!x||x===".."||x===".")||path.startsWith("pkg/")||path.startsWith(".github/")) throw new Error("Запрещённый путь: "+path);
+              if(typeof args.content!=="string"||args.content.length>500000) throw new Error("Содержимое должно быть текстом до 500 КБ.");
+              const current=await gh("/contents/"+path.split("/").map(encodeURIComponent).join("/")+"?ref=main");
+              const stagedId=id(),now=new Date().toISOString();
+              await env.DB.prepare("INSERT INTO github_staged_files (id,path,content,expected_sha,created_at) VALUES (?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET id=excluded.id,content=excluded.content,expected_sha=excluded.expected_sha,created_at=excluded.created_at").bind(stagedId,path,args.content,current.sha,now).run();
+              staged.push({path,characters:args.content.length});
+              result={staged:true,path,characters:args.content.length,commitRequired:false};
+            } else {result={error:"Unknown tool"};}
+            messages.push({role:"tool",tool_call_id:call.id,content:JSON.stringify(result)});
+          }
+        }
+        return json({ok:true,answer:"Достигнут лимит шагов за один запуск. Черновики сохранены.",staged,model});
+      }catch(e){return json({error:e.message,staged},502);}
+    }
+
     // Protected GitHub write workflow: stage -> review -> explicit commit.
     if (url.pathname.startsWith("/api/github/write/")) {
       if (!env.GITHUB_TOKEN) return json({ error: "GitHub не подключён." }, 503);
