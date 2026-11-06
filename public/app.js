@@ -64,6 +64,12 @@ $("#exportBtn").addEventListener("click",()=>{const text=transcript.map(x=>(x.ro
 fetch("/health").then(r=>r.json()).then(d=>{const dot=$("#statusDot");dot.classList.toggle("ok",d.openrouterConfigured || d.geminiConfigured);$("#statusText").textContent=(d.openrouterConfigured || d.geminiConfigured)?"AI подключён · GitHub "+(d.githubConfigured?"подключён":"не подключён"):"Нужен API-ключ";}).catch(()=>{$("#statusText").textContent="Нет связи с сервером";});
 
 // Autonomous office is the primary developer workspace; no browser-side admin key.
+async function devRequest(url, options={}) {
+  const response=await fetch(url,options);
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok) throw new Error(data.error||("HTTP "+response.status));
+  return data;
+}
 $("#devBtn")?.addEventListener("click",()=>document.querySelector(".office")?.scrollIntoView({behavior:"smooth",block:"start"}));
 
 $("#agentRun").addEventListener("click",async()=>{
