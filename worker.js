@@ -13,15 +13,17 @@ export default {
       return json({
         ok: true,
         app: "SLAV AI",
-        model: env.GEMINI_MODEL || "gemini-3.8-flash",
+        model: env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra:free",
+        provider: env.OPENROUTER_API_KEY ? "OpenRouter" : "Gemini",
+        openrouterConfigured: Boolean(env.OPENROUTER_API_KEY),
         geminiConfigured: Boolean(env.GEMINI_API_KEY),
         databaseConfigured: Boolean(env.DB)
       });
     }
 
     if (url.pathname === "/api/chat" && request.method === "POST") {
-      if (!env.GEMINI_API_KEY) {
-        return json({ error: "Не задан секрет GEMINI_API_KEY в настройках Worker." }, 503);
+      if (!env.OPENROUTER_API_KEY && !env.GEMINI_API_KEY) {
+        return json({ error: "Добавь секрет OPENROUTER_API_KEY в настройках Worker." }, 503);
       }
 
       let body;
@@ -50,49 +52,89 @@ export default {
             "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 12"
           ).bind(conversationId).all();
           history = (rows.results || []).reverse().map(row => ({
-            role: row.role === "assistant" ? "model" : "user",
-            parts: [{ text: row.content }]
+            role: row.role,
+            content: row.content
           }));
         } catch (e) {
           return json({ error: "Ошибка базы данных: " + e.message }, 500);
         }
       }
 
-      const contents = [...history, { role: "user", parts: [{ text: message }] }];
-      const model = env.GEMINI_MODEL || "gemini-3.8-flash";
+      let answer = "";
+      let providerError = "";
 
-      let upstream;
-      try {
-        upstream = await fetch(
-          "https://generativelanguage.googleapis.com/v1beta/models/" +
-            encodeURIComponent(model) + ":generateContent?key=" +
-            encodeURIComponent(env.GEMINI_API_KEY),
-          {
+      // Основная модель — бесплатная NVIDIA Nemotron через OpenRouter.
+      if (env.OPENROUTER_API_KEY) {
+        const model = env.OPENROUTER_MODEL || "nvidia/nemotron-3-ultra:free";
+        try {
+          const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
-            headers: { "content-type": "application/json" },
+            headers: {
+              "authorization": "Bearer " + env.OPENROUTER_API_KEY,
+              "content-type": "application/json",
+              "HTTP-Referer": "https://slav-ai-cloud.slafka1996.workers.dev",
+              "X-Title": "SLAV AI"
+            },
             body: JSON.stringify({
-              systemInstruction: { parts: [{ text: system }] },
-              contents,
-              generationConfig: { maxOutputTokens: 4096 }
+              model,
+              messages: [
+                { role: "system", content: system },
+                ...history,
+                { role: "user", content: message }
+              ],
+              max_tokens: 4096
             })
+          });
+          const result = await upstream.json().catch(() => ({}));
+          if (upstream.ok) {
+            answer = String(result.choices?.[0]?.message?.content || "").trim();
+          } else {
+            providerError = result.error?.message || ("OpenRouter HTTP " + upstream.status);
           }
-        );
-      } catch (e) {
-        return json({ error: "Не удалось связаться с Gemini: " + e.message }, 502);
+        } catch (e) {
+          providerError = e.message;
+        }
       }
 
-      const result = await upstream.json().catch(() => ({}));
-      if (!upstream.ok) {
+      // Резервный маршрут Gemini, если он настроен и бесплатный маршрут временно недоступен.
+      if (!answer && env.GEMINI_API_KEY) {
+        const model = env.GEMINI_MODEL || "gemini-2.5-flash";
+        const geminiHistory = history.map(row => ({
+          role: row.role === "assistant" ? "model" : "user",
+          parts: [{ text: row.content }]
+        }));
+        try {
+          const upstream = await fetch(
+            "https://generativelanguage.googleapis.com/v1beta/models/" +
+              encodeURIComponent(model) + ":generateContent?key=" +
+              encodeURIComponent(env.GEMINI_API_KEY),
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                systemInstruction: { parts: [{ text: system }] },
+                contents: [...geminiHistory, { role: "user", parts: [{ text: message }] }],
+                generationConfig: { maxOutputTokens: 4096 }
+              })
+            }
+          );
+          const result = await upstream.json().catch(() => ({}));
+          if (upstream.ok) {
+            answer = (result.candidates?.[0]?.content?.parts || [])
+              .map(part => part.text || "").join("").trim();
+          } else {
+            providerError = result.error?.message || ("Gemini HTTP " + upstream.status);
+          }
+        } catch (e) {
+          providerError = e.message;
+        }
+      }
+
+      if (!answer) {
         return json({
-          error: result.error?.message || "Ошибка Gemini API.",
-          upstreamStatus: upstream.status
-        }, upstream.status === 429 ? 429 : 502);
+          error: providerError || "Модель не вернула текстовый ответ. Проверь API-ключ и доступность бесплатной модели."
+        }, 502);
       }
-
-      const answer = (result.candidates?.[0]?.content?.parts || [])
-        .map(part => part.text || "").join("").trim();
-
-      if (!answer) return json({ error: "Gemini не вернула текстовый ответ." }, 502);
 
       if (env.DB) {
         try {
