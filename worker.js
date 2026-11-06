@@ -29,6 +29,14 @@ async function ensureDatabase(env) {
     "CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at)"
   ).run();
   await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS agent_requests (
+      id TEXT PRIMARY KEY,
+      ip_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `).run();
+  await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_agent_requests_ip_created ON agent_requests(ip_hash, created_at)").run();
+  await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS github_staged_files (
       id TEXT PRIMARY KEY,
       path TEXT NOT NULL UNIQUE,
@@ -72,10 +80,15 @@ export default {
     if (url.pathname === "/api/agent" && request.method === "POST") {
       if (!env.OPENROUTER_API_KEY) return json({error:"OpenRouter API key is not configured."},503);
       if (!env.GITHUB_TOKEN) return json({error:"GitHub is not connected."},503);
-      if (!env.SLAV_ADMIN_KEY) return json({error:"Admin protection is not configured."},503);
-      const adminKey=request.headers.get("x-slav-admin-key")||"";
-      if(adminKey.length!==env.SLAV_ADMIN_KEY.length || adminKey!==env.SLAV_ADMIN_KEY) return json({error:"Нет доступа."},401);
       if(!env.DB) return json({error:"D1 is required."},503);
+      // Anonymous agent access is rate-limited to protect free model quota.
+      const ip=request.headers.get("CF-Connecting-IP")||"unknown";
+      const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(ip+"|"+(env.SLAV_ADMIN_KEY||"slav-agent-rate-limit")));
+      const ipHash=Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("");
+      const since=new Date(Date.now()-60*60*1000).toISOString();
+      const usage=await env.DB.prepare("SELECT COUNT(*) AS n FROM agent_requests WHERE ip_hash=? AND created_at>?").bind(ipHash,since).first();
+      if((usage?.n||0)>=3) return json({error:"Лимит бесплатного агента: 3 запуска в час с одного IP. Попробуй позже."},429);
+      await env.DB.prepare("INSERT INTO agent_requests (id,ip_hash,created_at) VALUES (?,?,?)").bind(id(),ipHash,new Date().toISOString()).run();
       const input=await request.json().catch(()=>null);
       const task=String(input?.task||"").trim().slice(0,8000);
       if(!task) return json({error:"Опиши задачу."},400);
