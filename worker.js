@@ -5,9 +5,42 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 
 const id = () => crypto.randomUUID();
 
+async function ensureDatabase(env) {
+  if (!env.DB) return;
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    )
+  `).run();
+  await env.DB.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at)"
+  ).run();
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (env.DB && url.pathname !== "/health") {
+      try {
+        await ensureDatabase(env);
+      } catch (e) {
+        return json({ error: "Не удалось подготовить базу данных: " + e.message }, 500);
+      }
+    }
 
     if (url.pathname === "/health") {
       return json({
