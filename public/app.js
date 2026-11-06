@@ -8,6 +8,40 @@ let attachedFiles = [];
 let activeProjectId = null;
 const titles = {chat:"Обычный чат",think:"Глубокий анализ",code:"Программирование",research:"Исследование"};
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+}
+function renderMarkdown(source) {
+  const blocks=[];
+  let text=String(source||"").replace(/\r\n?/g,"\n").replace(/```([\w+-]*)\n([\s\S]*?)```/g,(_,lang,code)=>{
+    const token="@@CODEBLOCK"+blocks.length+"@@";
+    blocks.push({lang:lang||"code",code});
+    return "\n"+token+"\n";
+  });
+  text=escapeHtml(text);
+  text=text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  text=text.replace(/`([^`\n]+)`/g,"<code>$1</code>");
+  text=text.replace(/\*\*([^*\n]+)\*\*/g,"<strong>$1</strong>");
+  text=text.replace(/(^|[^*])\*([^*\n]+)\*/g,"$1<em>$2</em>");
+  const lines=text.split("\n"),out=[];
+  let listType=null;
+  const closeList=()=>{if(listType){out.push(listType==="ul"?"</ul>":"</ol>");listType=null;}};
+  for(const line of lines){
+    const codeMatch=line.match(/^@@CODEBLOCK(\d+)@@$/);
+    if(codeMatch){closeList();const b=blocks[Number(codeMatch[1])];out.push('<div class="code-block"><div class="code-toolbar"><span>'+escapeHtml(b.lang)+'</span><button type="button" class="copy-code">Копировать</button></div><pre><code>'+escapeHtml(b.code.replace(/\n$/,""))+'</code></pre></div>');continue;}
+    const heading=line.match(/^(#{1,3})\s+(.+)$/);
+    const bullet=line.match(/^\s*[-*]\s+(.+)$/);
+    const numbered=line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if(bullet||numbered){const type=bullet?"ul":"ol";if(listType!==type){closeList();out.push(type==="ul"?"<ul>":"<ol>");listType=type;}out.push("<li>"+(bullet?bullet[1]:numbered[1])+"</li>");continue;}
+    closeList();
+    if(!line.trim()){out.push("");continue;}
+    if(heading)out.push("<h"+heading[1].length+">"+heading[2]+"</h"+heading[1].length+">");
+    else if(line.startsWith("&gt; "))out.push('<blockquote>'+line.slice(5)+'</blockquote>');
+    else out.push("<p>"+line+"</p>");
+  }
+  closeList();
+  return out.join("");
+}
 function addMessage(role, text, error=false) {
   $("#welcome")?.remove();
   transcript.push({role,text});
@@ -17,8 +51,8 @@ function addMessage(role, text, error=false) {
   avatar.className = "avatar";
   avatar.textContent = role === "user" ? "Я" : "S";
   const content = document.createElement("div");
-  content.className = "content";
-  content.textContent = text;
+  content.className = "content markdown-content";
+  content.innerHTML = renderMarkdown(text);
   el.append(avatar,content);
   messages.append(el);
   messages.scrollTop = messages.scrollHeight;
@@ -72,6 +106,7 @@ async function startNewChat(){conversationId=null;transcript=[];messages.innerHT
 $('#newChat').addEventListener('click',startNewChat);
 document.querySelectorAll(".mode").forEach(btn=>btn.addEventListener("click",()=>{mode=btn.dataset.mode;document.querySelectorAll(".mode").forEach(x=>x.classList.toggle("active",x===btn));$("#modeTitle").textContent=titles[mode];$("#menuBtn").closest("header");$(".sidebar").classList.remove("open");}));
 messages.addEventListener("click",e=>{const btn=e.target.closest("[data-prompt]");if(btn){promptBox.value=btn.dataset.prompt;send();}});
+messages.addEventListener("click",async e=>{const button=e.target.closest(".copy-code");if(!button)return;const code=button.closest(".code-block")?.querySelector("code")?.textContent||"";try{await navigator.clipboard.writeText(code);button.textContent="Скопировано";setTimeout(()=>button.textContent="Копировать",1400);}catch{button.textContent="Не удалось";}});
 $("#menuBtn").addEventListener("click",()=>$(".sidebar").classList.toggle("open"));
 $("#exportBtn").addEventListener("click",()=>{const text=transcript.map(x=>(x.role==="user"?"Вы":"SLAV AI")+":\n"+x.text).join("\n\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type:"text/plain"}));a.download="slav-ai-chat.txt";a.click();URL.revokeObjectURL(a.href);});
 fetch("/health").then(r=>r.json()).then(d=>{const dot=$("#statusDot");dot.classList.toggle("ok",d.openrouterConfigured || d.geminiConfigured);$("#statusText").textContent=(d.openrouterConfigured || d.geminiConfigured)?"AI подключён · GitHub "+(d.githubConfigured?"подключён":"не подключён"):"Нужен API-ключ";}).catch(()=>{$("#statusText").textContent="Нет связи с сервером";});
