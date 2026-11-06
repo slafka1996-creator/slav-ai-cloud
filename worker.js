@@ -71,8 +71,19 @@ export default {
       try {
         if (url.pathname === "/api/github/status") {
           const response = await fetch("https://api.github.com/repos/" + repo, { headers });
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) return json({ connected: false, error: data.message || "GitHub API error", githubStatus: response.status, repositoryChecked: repo, hint: response.status === 401 ? "Токен недействителен или истёк." : response.status === 403 ? "Проверь срок действия токена и права Metadata: Read-only и Contents: Read-only." : response.status === 404 ? "Репозиторий не найден для этого токена. Проверь Repository access и имя репозитория." : "Проверь токен и доступ к репозиторию." }, response.status);
+          const raw = await response.text();
+          let data = {};
+          try { data = JSON.parse(raw); } catch {}
+          if (!response.ok) return json({
+            connected: false,
+            error: data.message || raw.slice(0, 500) || "GitHub API вернул пустой ответ.",
+            githubStatus: response.status,
+            repositoryChecked: repo,
+            requestId: response.headers.get("x-github-request-id"),
+            rateLimitRemaining: response.headers.get("x-ratelimit-remaining"),
+            rateLimitReset: response.headers.get("x-ratelimit-reset"),
+            hint: response.status === 401 ? "Токен недействителен или истёк." : response.status === 403 ? "Смотри error и rateLimitRemaining: это может быть запрет токена, лимит API или политика доступа." : response.status === 404 ? "Репозиторий не найден для этого токена. Проверь Repository access и имя репозитория." : "Проверь токен и доступ к репозиторию."
+          }, response.status);
           return json({ connected: true, repository: data.full_name, defaultBranch: data.default_branch, private: data.private });
         }
         if (url.pathname === "/api/github/tree") {
