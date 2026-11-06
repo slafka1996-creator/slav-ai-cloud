@@ -71,6 +71,36 @@ async function devRequest(url, options={}) {
   return data;
 }
 $("#devBtn")?.addEventListener("click",()=>document.querySelector(".office")?.scrollIntoView({behavior:"smooth",block:"start"}));
+let latestCiFailure = null;
+async function refreshCiStatus() {
+  const panel=$("#ciStatus"), fix=$("#ciFix");
+  try {
+    const data=await devRequest("/api/ci/status");
+    if(!data.found){panel.textContent=data.message||"Автотесты пока не запускались.";fix.hidden=true;return;}
+    const run=data.run, jobs=data.jobs||[];
+    const failed=jobs.flatMap(job=>(job.failedSteps||[]).map(step=>job.name+": "+step));
+    if(run.status==="completed"&&run.conclusion==="success"){
+      panel.textContent="✓ Автотесты пройдены · запуск #"+run.number;
+      panel.dataset.state="success";fix.hidden=true;latestCiFailure=null;
+    } else if(run.status==="completed"&&run.conclusion!=="success"){
+      panel.textContent="✕ Автотесты завершились с ошибкой · "+(failed.join("; ")||run.conclusion);
+      panel.dataset.state="failure";latestCiFailure={run,failed};fix.hidden=false;
+    } else {
+      panel.textContent="⏳ Автотесты выполняются · запуск #"+run.number;
+      panel.dataset.state="running";fix.hidden=true;
+    }
+    panel.dataset.url=run.url||"";
+  } catch(e){panel.textContent="Не удалось получить статус CI: "+e.message;fix.hidden=true;}
+}
+$("#ciFix")?.addEventListener("click",()=>{
+  if(!latestCiFailure)return;
+  const {run,failed}=latestCiFailure;
+  $("#agentTask").value="Исправь ошибки последнего CI-прогона SLAV AI. Запуск #"+run.number+" ("+run.sha+"). Не ограничивайся описанием: изучи исходники, найди причину, подготовь исправления. Ошибочные шаги: "+(failed.join("; ")||"Смотри отчёт GitHub Actions.")+". После подготовки объясни, какие тесты нужно повторить. Отчёт: "+run.url;
+  $("#agentTask").focus();
+  $("#agentTask").scrollIntoView({behavior:"smooth",block:"center"});
+});
+refreshCiStatus();
+
 
 $("#agentRun").addEventListener("click",async()=>{
   const task=$("#agentTask").value.trim();
