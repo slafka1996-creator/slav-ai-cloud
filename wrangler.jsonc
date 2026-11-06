@@ -6,9 +6,19 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*", "/health"]
+    "run_worker_first": [
+      "/api/*",
+      "/health"
+    ]
   },
   "observability": {
     "enabled": true
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "slav-ai-db",
+      "database_id": "24528809-058d-437d-a16c-f46d10011a20"
+    }
+  ]
 }
