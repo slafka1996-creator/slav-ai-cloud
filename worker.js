@@ -242,9 +242,9 @@ export default {
         if(!response.ok){const detail=await response.text().catch(()=>"");throw new Error("Sandbox HTTP "+response.status+": "+detail.slice(0,500));}
         return response;
       };
-      const runSandbox=async(command,timeout=60000)=>{
+      const runSandbox=async(command,timeout=60000,cwd="/workspace/repo")=>{
         if(!sandboxId) throw new Error("Sandbox не создан.");
-        const response=await sandboxCall("/v1/sandbox/"+encodeURIComponent(sandboxId)+"/exec",{method:"POST",body:JSON.stringify({argv:["sh","-lc",command],timeout_ms:Math.min(120000,Math.max(1000,timeout)),cwd:"/workspace/repo"})});
+        const response=await sandboxCall("/v1/sandbox/"+encodeURIComponent(sandboxId)+"/exec",{method:"POST",body:JSON.stringify({argv:["sh","-lc",command],timeout_ms:Math.min(120000,Math.max(1000,timeout)),cwd})});
         const raw=await response.text();let stdout="",stderr="",exitCode=null,error=null;
         for(const block of raw.split(/\r?\n\r?\n/)){let event="message",data="";for(const line of block.split(/\r?\n/)){if(line.startsWith("event:"))event=line.slice(6).trim();else if(line.startsWith("data:"))data+=line.slice(5).trim();}if(!data)continue;if(event==="stdout"||event==="stderr"){let decoded="";try{decoded=new TextDecoder().decode(Uint8Array.from(atob(data),ch=>ch.charCodeAt(0)));}catch{}if(event==="stdout")stdout+=decoded;else stderr+=decoded;}else if(event==="exit"){try{exitCode=JSON.parse(data).exit_code;}catch{}}else if(event==="error"){try{error=JSON.parse(data).error;}catch{error=data;}}}
         return {stdout:stdout.slice(-14000),stderr:stderr.slice(-6000),exitCode,error};
@@ -254,8 +254,15 @@ export default {
           const created=await sandboxCall("/v1/sandbox",{method:"POST",body:"{}"});
           sandboxId=String((await created.json()).id||"");
           if(!sandboxId) throw new Error("Sandbox API не вернул id.");
-          const clone=await runSandbox("git clone --depth 1 https://github.com/"+repo+".git /workspace/repo && cd /workspace/repo && pwd && git rev-parse --short HEAD",90000);
-          if(clone.exitCode!==0) throw new Error(clone.stderr||clone.error||"Не удалось клонировать репозиторий.");
+          const archiveResponse=await fetch("https://api.github.com/repos/"+repo+"/tarball/main",{headers:ghHeaders});
+          if(!archiveResponse.ok) throw new Error("GitHub archive HTTP "+archiveResponse.status);
+          const archiveSize=Number(archiveResponse.headers.get("content-length")||0);
+          if(archiveSize>32*1024*1024) throw new Error("Архив репозитория превышает лимит Sandbox 32 МБ.");
+          const archive=await archiveResponse.arrayBuffer();
+          if(archive.byteLength>32*1024*1024) throw new Error("Архив репозитория превышает лимит Sandbox 32 МБ.");
+          await sandboxCall("/v1/sandbox/"+encodeURIComponent(sandboxId)+"/hydrate",{method:"POST",headers:{"content-type":"application/gzip"},body:archive});
+          const seed=await runSandbox("set -e; root=$(find /workspace -mindepth 1 -maxdepth 1 -type d | head -n 1); test -n \\"$root\\"; mkdir -p /workspace/repo; cp -a \\"$root\\"/. /workspace/repo/; cd /workspace/repo; git init -q; git add -A; git -c user.name='SLAV AI Sandbox' -c user.email='sandbox@slav-ai.invalid' commit -qm 'Sandbox baseline'; printf 'Sandbox workspace ready: '; pwd; git rev-parse --short HEAD",90000,"/workspace");
+          if(seed.exitCode!==0) throw new Error(seed.stderr||seed.error||"Не удалось подготовить файлы репозитория в Sandbox.");
         }catch(e){if(sandboxId) await fetch(sandboxBase+"/v1/sandbox/"+encodeURIComponent(sandboxId),{method:"DELETE",headers:sandboxHeaders}).catch(()=>{});return json({error:"Не удалось подготовить Sandbox: "+e.message},503);}
       }
       const tools=[
