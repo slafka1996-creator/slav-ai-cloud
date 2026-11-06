@@ -65,6 +65,7 @@ export default {
       const repo = env.GITHUB_REPO || "slafka1996-creator/steadycity-releases";
       const headers = {
         "authorization": "Bearer " + env.GITHUB_TOKEN,
+        "user-agent": "SLAV-AI-Cloud/1.0",
         "accept": "application/vnd.github+json",
         "x-github-api-version": "2022-11-28"
       };
