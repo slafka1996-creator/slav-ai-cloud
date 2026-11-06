@@ -193,17 +193,19 @@ export default {
       };
       const tools=[
         {type:"function",function:{name:"list_files",description:"List files and folders in a repository directory. Use path empty for root.",parameters:{type:"object",properties:{path:{type:"string",description:"Directory path, empty for root"}} ,required:["path"],additionalProperties:false}}},
+        {type:"function",function:{name:"search_code",description:"Search source code in the connected GitHub repository by exact symbol, phrase or keyword. Use this before guessing where a feature is implemented.",parameters:{type:"object",properties:{query:{type:"string",description:"Search phrase or code symbol"}},required:["query"],additionalProperties:false}}},
         {type:"function",function:{name:"read_file",description:"Read a text file from the repository main branch.",parameters:{type:"object",properties:{path:{type:"string"}},required:["path"],additionalProperties:false}}},
+        {type:"function",function:{name:"get_file_history",description:"Get recent commits that changed a specific repository file.",parameters:{type:"object",properties:{path:{type:"string"}},required:["path"],additionalProperties:false}}},
         {type:"function",function:{name:"stage_file",description:"Stage a complete replacement for an existing text file. Does not publish or commit it. Only allowed project folders.",parameters:{type:"object",properties:{path:{type:"string"},content:{type:"string"}},required:["path","content"],additionalProperties:false}}}
       ];
       const messages=[
-        {role:"system",content:"Ты SLAV AI Developer Agent, работаешь с репозиторием "+repo+". Самостоятельно исследуй задачу: сначала изучи AGENTS.md и README.md, затем найди релевантные файлы, прочитай их и внеси необходимые исправления. Пользуйся инструментами, не выдумывай содержимое файлов. Для stage_file передавай ПОЛНОЕ итоговое содержимое файла. Разрешённые пути только внутри gorodok/, src/, tools/, microcity-deploy/. Не меняй pkg/, .github/workflows/, секреты и конфигурацию деплоя. Не публикуй коммиты. В конце перечисли изученные файлы, подготовленные изменения и то, что ещё не удалось проверить. Если задача неоднозначна — задай уточняющий вопрос, не меняй файлы."},
+        {role:"system",content:"Ты SLAV AI Developer Agent, работаешь с репозиторием "+repo+". Самостоятельно исследуй задачу: сначала изучи AGENTS.md и README.md, затем найди релевантные файлы через search_code и list_files, изучи историю изменений через get_file_history при необходимости, прочитай релевантные файлы и внеси необходимые исправления. Пользуйся инструментами, не выдумывай содержимое файлов. Для stage_file передавай ПОЛНОЕ итоговое содержимое файла. Разрешённые пути только внутри gorodok/, src/, tools/, microcity-deploy/. Не меняй pkg/, .github/workflows/, секреты и конфигурацию деплоя. Не публикуй коммиты. В конце перечисли изученные файлы, подготовленные изменения и то, что ещё не удалось проверить. Если задача неоднозначна — задай уточняющий вопрос, не меняй файлы."},
         {role:"user",content:task}
       ];
       const model=env.OPENROUTER_MODEL||"nvidia/nemotron-3-ultra-550b-a55b:free";
       const staged=[];
       try{
-        for(let turn=0;turn<8;turn++){
+        for(let turn=0;turn<12;turn++){
           const response=await fetch("https://openrouter.ai/api/v1/chat/completions",{
             method:"POST",headers:{"authorization":"Bearer "+env.OPENROUTER_API_KEY,"content-type":"application/json","HTTP-Referer":"https://slav-ai-cloud.slafka1996.workers.dev","X-Title":"SLAV AI Studio"},
             body:JSON.stringify({model,messages,tools,tool_choice:"auto",max_tokens:5000})
@@ -245,6 +247,15 @@ export default {
               if(path.split("/").some(x=>x===".."||x===".")) throw new Error("Недопустимый путь.");
               const d=await gh("/contents/"+path.split("/").filter(Boolean).map(encodeURIComponent).join("/")+"?ref=main");
               result=(Array.isArray(d)?d:[d]).map(x=>({name:x.name,path:x.path,type:x.type,size:x.size}));
+            } else if(call.function.name==="search_code"){
+              const query=String(args.query||"").trim().slice(0,160);
+              if(!query) throw new Error("Укажи поисковый запрос.");
+              const d=await gh("/search/code?q="+encodeURIComponent(query+" repo:"+repo)+"&per_page=12");
+              result={total_count:d.total_count||0,items:(d.items||[]).map(x=>({path:x.path,name:x.name,html_url:x.html_url,repository:x.repository?.full_name}))};
+            } else if(call.function.name==="get_file_history"){
+              if(!path||path.split("/").some(x=>x===".."||x===".")) throw new Error("Недопустимый путь.");
+              const d=await gh("/commits?path="+encodeURIComponent(path)+"&per_page=8");
+              result=(Array.isArray(d)?d:[]).map(x=>({sha:x.sha,message:x.commit?.message,date:x.commit?.author?.date,url:x.html_url}));
             } else if(call.function.name==="read_file"){
               if(!path||path.split("/").some(x=>x===".."||x===".")) throw new Error("Недопустимый путь.");
               const d=await gh("/contents/"+path.split("/").map(encodeURIComponent).join("/")+"?ref=main");
