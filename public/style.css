@@ -101,3 +101,21 @@ body{background:#0b0b0c;color:#fff4e9}
 /* File attachments in the chat composer */
 .attach-btn{width:38px;height:38px;flex:0 0 38px;border:1px solid #70421f;border-radius:11px;background:#21170f;color:#ffad65;font-size:24px;line-height:1;cursor:pointer}.attachment-list{width:min(850px,calc(100% - 32px));margin:8px auto 0;display:flex;gap:7px;flex-wrap:wrap}.attachment-list[hidden]{display:none}.attachment-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 9px;border:1px solid #75431e;border-radius:8px;background:#21170f;color:#ffd0a2;font-size:11px}.attachment-chip button{border:0;background:transparent;color:#ffb17a;font-size:17px;cursor:pointer;padding:0 2px}
 @media(max-width:700px){.attach-btn{width:34px;flex-basis:34px}.attachment-list{width:calc(100% - 20px)}}
+
+
+/* Claude-style readable Markdown responses and copyable code blocks */
+.markdown-content{line-height:1.7;overflow-wrap:anywhere}
+.markdown-content p{margin:0 0 10px}
+.markdown-content p:last-child{margin-bottom:0}
+.markdown-content h1,.markdown-content h2,.markdown-content h3{margin:18px 0 9px;line-height:1.3;color:#fff}
+.markdown-content h1{font-size:22px}.markdown-content h2{font-size:19px}.markdown-content h3{font-size:16px}
+.markdown-content ul,.markdown-content ol{margin:7px 0 13px;padding-left:24px}
+.markdown-content li{padding:2px 0}
+.markdown-content blockquote{margin:10px 0;padding:8px 13px;border-left:3px solid var(--accent);background:#ffffff08;color:#cbd3df}
+.markdown-content a{color:#ffad65;text-decoration:underline}
+.markdown-content code:not(pre code){padding:2px 5px;border-radius:5px;background:#272d39;color:#ffd0a2;font: .9em ui-monospace,monospace}
+.code-block{margin:12px 0 15px;border:1px solid #343d4e;border-radius:10px;overflow:hidden;background:#0b0e14}
+.code-toolbar{display:flex;align-items:center;justify-content:space-between;padding:7px 11px;background:#171d29;color:#9daabd;font-size:11px}
+.code-toolbar button{border:1px solid #414b5e;border-radius:6px;background:#242b39;color:#e5eaf3;padding:5px 9px;font-size:11px;cursor:pointer}
+.code-block pre{margin:0;padding:14px;overflow:auto;max-width:100%;color:#e5eaf3;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre}
+.code-block pre code{font:inherit}
