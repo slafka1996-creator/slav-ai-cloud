@@ -28,6 +28,15 @@ async function ensureDatabase(env) {
   await env.DB.prepare(
     "CREATE INDEX IF NOT EXISTS idx_messages_conversation_created ON messages(conversation_id, created_at)"
   ).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS github_staged_files (
+      id TEXT PRIMARY KEY,
+      path TEXT NOT NULL UNIQUE,
+      content TEXT NOT NULL,
+      expected_sha TEXT,
+      created_at TEXT NOT NULL
+    )
+  `).run();
 }
 
 export default {
@@ -53,8 +62,125 @@ export default {
         geminiFallbackModel: "gemini-3.8-flash",
         databaseConfigured: Boolean(env.DB),
         githubConfigured: Boolean(env.GITHUB_TOKEN),
+        githubWriteProtectionConfigured: Boolean(env.SLAV_ADMIN_KEY),
         githubRepository: env.GITHUB_REPO || "slafka1996-creator/steadycity-releases"
       });
+    }
+
+    // Protected GitHub write workflow: stage -> review -> explicit commit.
+    if (url.pathname.startsWith("/api/github/write/")) {
+      if (!env.GITHUB_TOKEN) return json({ error: "GitHub не подключён." }, 503);
+      if (!env.SLAV_ADMIN_KEY) return json({ error: "Добавь секрет SLAV_ADMIN_KEY в Cloudflare." }, 503);
+      const suppliedKey = request.headers.get("x-slav-admin-key") || "";
+      if (suppliedKey.length !== env.SLAV_ADMIN_KEY.length || suppliedKey !== env.SLAV_ADMIN_KEY) {
+        return json({ error: "Нет доступа." }, 401);
+      }
+      if (!env.DB) return json({ error: "Для очереди изменений нужна база D1." }, 503);
+
+      const repo = env.GITHUB_REPO || "slafka1996-creator/steadycity-releases";
+      const ghHeaders = {
+        "authorization": "Bearer " + env.GITHUB_TOKEN,
+        "user-agent": "SLAV-AI-Cloud/1.0",
+        "accept": "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28",
+        "content-type": "application/json"
+      };
+      const gh = async (path, options = {}) => {
+        const response = await fetch("https://api.github.com/repos/" + repo + path, {
+          ...options, headers: { ...ghHeaders, ...(options.headers || {}) }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error("GitHub " + response.status + ": " + (data.message || "API error"));
+        return data;
+      };
+      try {
+        if (url.pathname === "/api/github/write/stage" && request.method === "POST") {
+          const body = await request.json().catch(() => null);
+          if (!body) return json({ error: "Некорректный JSON." }, 400);
+          const path = String(body.path || "").replace(/^\\/+/, "");
+          const fileContent = body.content;
+          if (!path || path.length > 240 || path.split("/").some(part => !part || part === "." || part === "..") ||
+              path.startsWith(".github/workflows/") || path.startsWith("pkg/") ||
+              !/^(gorodok|src|tools|microcity-deploy)\\//.test(path)) {
+            return json({ error: "Путь запрещён. Разрешены только файлы внутри gorodok/, src/, tools/ и microcity-deploy/; pkg/ и workflows защищены." }, 400);
+          }
+          if (typeof fileContent !== "string" || fileContent.length > 500000) {
+            return json({ error: "Содержимое файла должно быть текстом до 500 КБ." }, 400);
+          }
+          const current = await gh("/contents/" + path.split("/").map(encodeURIComponent).join("/") + "?ref=main");
+          if (body.expectedSha && body.expectedSha !== current.sha) {
+            return json({ error: "Файл изменился после чтения. Перечитай его перед подготовкой изменений.", currentSha: current.sha }, 409);
+          }
+          const stagedId = id();
+          const now = new Date().toISOString();
+          await env.DB.prepare(
+            "INSERT INTO github_staged_files (id, path, content, expected_sha, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(path) DO UPDATE SET id=excluded.id, content=excluded.content, expected_sha=excluded.expected_sha, created_at=excluded.created_at"
+          ).bind(stagedId, path, fileContent, current.sha, now).run();
+          return json({ staged: true, stagedId, path, previousSha: current.sha, characters: fileContent.length, requiresReviewAndCommit: true });
+        }
+
+        if (url.pathname === "/api/github/write/staged" && request.method === "GET") {
+          const rows = await env.DB.prepare(
+            "SELECT id, path, expected_sha, created_at, length(content) AS characters FROM github_staged_files ORDER BY created_at ASC"
+          ).all();
+          return json({ staged: rows.results || [] });
+        }
+
+        if (url.pathname === "/api/github/write/discard" && request.method === "POST") {
+          const body = await request.json().catch(() => ({}));
+          if (body.id) await env.DB.prepare("DELETE FROM github_staged_files WHERE id = ?").bind(String(body.id)).run();
+          else if (body.path) await env.DB.prepare("DELETE FROM github_staged_files WHERE path = ?").bind(String(body.path)).run();
+          else return json({ error: "Укажи id или path." }, 400);
+          return json({ discarded: true });
+        }
+
+        if (url.pathname === "/api/github/write/commit" && request.method === "POST") {
+          const body = await request.json().catch(() => null);
+          if (!body || body.confirm !== true) return json({ error: "Для записи передай confirm: true после просмотра списка staged." }, 400);
+          const rows = await env.DB.prepare(
+            "SELECT id, path, content, expected_sha FROM github_staged_files ORDER BY created_at ASC"
+          ).all();
+          const files = rows.results || [];
+          if (!files.length) return json({ error: "Нет подготовленных изменений." }, 400);
+
+          const ref = await gh("/git/ref/heads/main");
+          const head = await gh("/git/commits/" + ref.object.sha);
+          const baseTree = head.tree.sha;
+          const tree = [];
+          for (const file of files) {
+            const current = await gh("/contents/" + file.path.split("/").map(encodeURIComponent).join("/") + "?ref=main");
+            if (current.sha !== file.expected_sha) {
+              return json({ error: "Конфликт: файл " + file.path + " изменился в GitHub. Изменения не опубликованы.", conflictPath: file.path }, 409);
+            }
+            const blob = await gh("/git/blobs", {
+              method: "POST",
+              body: JSON.stringify({ content: file.content, encoding: "utf-8" })
+            });
+            tree.push({ path: file.path, mode: "100644", type: "blob", sha: blob.sha });
+          }
+          const newTree = await gh("/git/trees", {
+            method: "POST",
+            body: JSON.stringify({ base_tree: baseTree, tree })
+          });
+          const commit = await gh("/git/commits", {
+            method: "POST",
+            body: JSON.stringify({
+              message: String(body.message || "Update files via SLAV AI").slice(0, 200),
+              tree: newTree.sha,
+              parents: [ref.object.sha]
+            })
+          });
+          await gh("/git/refs/heads/main", {
+            method: "PATCH",
+            body: JSON.stringify({ sha: commit.sha, force: false })
+          });
+          await env.DB.prepare("DELETE FROM github_staged_files").run();
+          return json({ committed: true, commit: commit.sha, files: files.map(file => file.path), branch: "main" });
+        }
+        return json({ error: "Неизвестный endpoint или метод." }, 404);
+      } catch (e) {
+        return json({ error: e.message }, 502);
+      }
     }
 
     // Read-only GitHub bridge for the coding agent.
