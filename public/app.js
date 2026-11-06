@@ -129,63 +129,13 @@ $("#menuBtn").addEventListener("click",()=>$(".sidebar").classList.toggle("open"
 $("#exportBtn").addEventListener("click",()=>{const text=transcript.map(x=>(x.role==="user"?"Вы":"SLAV AI")+":\n"+x.text).join("\n\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type:"text/plain"}));a.download="slav-ai-chat.txt";a.click();URL.revokeObjectURL(a.href);});
 fetch("/health").then(r=>r.json()).then(d=>{const dot=$("#statusDot");dot.classList.toggle("ok",d.openrouterConfigured || d.geminiConfigured);$("#statusText").textContent=(d.openrouterConfigured || d.geminiConfigured)?"AI подключён · GitHub "+(d.githubConfigured?"подключён":"не подключён"):"Нужен API-ключ";}).catch(()=>{$("#statusText").textContent="Нет связи с сервером";});
 
-// Autonomous office is the primary developer workspace; no browser-side admin key.
+// Shared API helper for projects and workspace features.
 async function devRequest(url, options={}) {
   const response=await fetch(url,options);
   const data=await response.json().catch(()=>({}));
   if(!response.ok) throw new Error(data.error||("HTTP "+response.status));
   return data;
 }
-$("#devBtn")?.addEventListener("click",()=>document.querySelector(".office")?.scrollIntoView({behavior:"smooth",block:"start"}));
-let latestCiFailure = null;
-async function refreshCiStatus() {
-  const panel=$("#ciStatus"), fix=$("#ciFix");
-  try {
-    const data=await devRequest("/api/ci/status");
-    if(!data.found){panel.textContent=data.message||"Автотесты пока не запускались.";fix.hidden=true;return;}
-    const run=data.run, jobs=data.jobs||[];
-    const failed=jobs.flatMap(job=>(job.failedSteps||[]).map(step=>job.name+": "+step));
-    if(run.status==="completed"&&run.conclusion==="success"){
-      panel.textContent="✓ Автотесты пройдены · запуск #"+run.number;
-      panel.dataset.state="success";fix.hidden=true;latestCiFailure=null;
-    } else if(run.status==="completed"&&run.conclusion!=="success"){
-      panel.textContent="✕ Автотесты завершились с ошибкой · "+(failed.join("; ")||run.conclusion);
-      panel.dataset.state="failure";latestCiFailure={run,failed};fix.hidden=false;
-    } else {
-      panel.textContent="⏳ Автотесты выполняются · запуск #"+run.number;
-      panel.dataset.state="running";fix.hidden=true;
-    }
-    panel.dataset.url=run.url||"";
-  } catch(e){panel.textContent="Не удалось получить статус CI: "+e.message;fix.hidden=true;}
-}
-$("#ciFix")?.addEventListener("click",()=>{
-  if(!latestCiFailure)return;
-  const {run,failed}=latestCiFailure;
-  $("#agentTask").value="Исправь ошибки последнего CI-прогона SLAV AI. Запуск #"+run.number+" ("+run.sha+"). Не ограничивайся описанием: изучи исходники, найди причину, подготовь исправления. Ошибочные шаги: "+(failed.join("; ")||"Смотри отчёт GitHub Actions.")+". После подготовки объясни, какие тесты нужно повторить. Отчёт: "+run.url;
-  $("#agentTask").focus();
-  $("#agentTask").scrollIntoView({behavior:"smooth",block:"center"});
-});
-refreshCiStatus();
-
-
-$("#agentRun").addEventListener("click",async()=>{
-  const task=$("#agentTask").value.trim();
-  if(!task){$("#agentResult").textContent="Опиши задачу для агента.";return;}
-  const btn=$("#agentRun"),floor=document.querySelector(".office-floor");btn.disabled=true;floor.classList.add("busy");
-  $("#devAgentState").textContent="Получает задачу…";$("#designAgentState").textContent="Ожидает распределения";$("#testAgentState").textContent="Ожидает код";
-  $("#agentResult").textContent="Диспетчер принимает задачу и направляет её разработчику…";
-  try{
-    const data=await devRequest("/api/agent",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({task})});
-    $("#devAgentState").textContent=(data.staged||[]).length?"Подготовил изменения":"Закончил анализ";
-    $("#designAgentState").textContent="Модуль в разработке";
-    $("#testAgentState").textContent="Модуль в разработке";
-    const team=data.team||{};
-    $("#designAgentState").textContent=team.designer?"Проверил UI":"Нет изменений для проверки";
-    $("#testAgentState").textContent=team.tester?"Провёл статический QA":"Нет изменений для проверки";
-    $("#agentResult").textContent=(data.answer||"Готово.")+"\n\n🎨 UI DESIGNER\n"+(team.designer||"Проверка не запускалась.")+"\n\n🧪 BROWSER TESTER / QA\n"+(team.tester||"Проверка не запускалась.")+"\n\n📁 Подготовленные файлы:\n"+((data.staged||[]).map(x=>x.path+" ("+x.characters+" символов)").join("\n")||"Нет");
-  }catch(e){$("#agentResult").textContent="Ошибка агента: "+e.message;}
-  finally{btn.disabled=false;floor.classList.remove("busy");}
-});
 
 
 // Workspace navigation, durable projects and interactive HTML artifacts.
@@ -198,8 +148,7 @@ function showView(view) {
   $("#artifactsView").hidden = view !== "artifacts";
   $("#messages").hidden = view !== "chat";
   $(".composer-wrap").hidden = view !== "chat";
-  $(".office-main").hidden = view !== "chat";
-  $("#modeTitle").textContent = view==="projects" ? "Проекты" : view==="artifacts" ? "Artifacts" : "Офис SLAV AI";
+  $("#modeTitle").textContent = view==="projects" ? "Проекты" : view==="artifacts" ? "Artifacts" : "SLAV AI";
   if(view==="projects") loadProjects();
 }
 document.querySelectorAll(".workspace-tab").forEach(b=>b.addEventListener("click",()=>showView(b.dataset.view)));
